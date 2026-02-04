@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html class="dark" lang="zh-CN">
+
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport" />
+    <title>速刷单词 - 刷词</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com" rel="preconnect" />
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        primary: "#f59e0b",
+                        "accent-teal": "#26c6da",
+                        "background-dark": "#1e212f",
+                        "card-dark": "#2d3248",
+                        "surface-dark": "#2d3446",
+                    },
+                    fontFamily: {
+                        display: ["Inter", "system-ui", "sans-serif"],
+                    },
+                    borderRadius: {
+                        DEFAULT: "12px",
+                        'pill': "9999px",
+                    },
+                },
+            },
+        };
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .word-card {
+            transition: all 0.3s ease;
+        }
+
+        .word-card.slide-out-left {
+            transform: translateX(-120%);
+            opacity: 0;
+        }
+
+        .word-card.slide-out-right {
+            transform: translateX(120%);
+            opacity: 0;
+        }
+
+        .word-card.slide-in {
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(50%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .detail-card {
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+
+<body class="bg-background-dark text-slate-100 min-h-screen flex flex-col">
+    <!-- Header -->
+    <header class="px-6 flex items-center justify-between h-14 mt-4">
+        <div class="flex items-center gap-4">
+            <button onclick="goBack()" class="text-slate-400 hover:text-white">
+                <span class="material-icons-round text-2xl">chevron_left</span>
+            </button>
+            <span id="progress" class="text-sm font-medium text-slate-400">0/0</span>
+        </div>
+        <div class="flex items-center gap-5">
+            <button onclick="speakWord()" class="text-slate-400 hover:text-white">
+                <span class="material-icons-round text-xl">volume_up</span>
+            </button>
+            <button onclick="toggleFullscreen()" class="text-slate-400 hover:text-white">
+                <span id="fullscreenIcon" class="material-icons-round text-xl">fullscreen</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main id="cardContainer" class="flex-1 px-8 pt-10 flex flex-col overflow-y-auto">
+        <!-- 单词卡片（问答模式） -->
+        <div id="wordCard" class="word-card">
+            <h1 id="wordText" class="text-5xl font-bold mb-4 tracking-tight text-white cursor-pointer"
+                onclick="speakWord()">
+                Loading...
+            </h1>
+            <div class="flex items-center gap-3 mb-10">
+                <button onclick="speakWord()"
+                    class="flex items-center gap-1.5 bg-white/10 px-3 py-1 rounded-md hover:bg-white/20 transition-colors">
+                    <span class="text-xs font-bold text-slate-300">美</span>
+                    <span class="material-icons-round text-sm text-slate-300">volume_up</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- 单词详情卡片（点击不认识后显示） -->
+        <div id="detailCard" class="detail-card hidden">
+            <h1 id="detailWord" class="text-4xl font-bold mb-2 tracking-tight text-white cursor-pointer"
+                onclick="playDictAudio()">
+                word
+            </h1>
+            <div class="flex items-center gap-3 mb-4">
+                <span id="phonetic" class="text-slate-400 text-sm">/ˈwɜːrd/</span>
+                <button onclick="playDictAudio()"
+                    class="flex items-center gap-1.5 bg-white/10 px-3 py-1 rounded-md hover:bg-white/20 transition-colors">
+                    <span class="text-xs font-bold text-slate-300">美</span>
+                    <span class="material-icons-round text-sm text-slate-300">volume_up</span>
+                </button>
+            </div>
+
+            <!-- 释义区域 -->
+            <div id="definitionArea" class="mb-4 space-y-3">
+                <div class="text-slate-400 text-sm">正在加载释义...</div>
+            </div>
+
+            <!-- 例句区域 -->
+            <div id="exampleArea" class="hidden mb-4 bg-card-dark rounded-xl p-4">
+                <div class="flex items-start gap-2">
+                    <span class="material-icons-round text-accent-teal text-sm mt-1">format_quote</span>
+                    <div>
+                        <p id="exampleText" class="text-slate-200 text-sm mb-1"></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 提示信息 -->
+            <div id="mistakeTip" class="bg-surface-dark rounded-xl p-4 mb-4">
+                <div class="flex items-start gap-3">
+                    <span class="material-icons-round text-primary text-lg">lightbulb</span>
+                    <div>
+                        <p class="text-sm text-slate-300 mb-1">这个单词已加入错词本</p>
+                        <p class="text-xs text-slate-500">稍后可以在错词本中复习</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 完成提示 -->
+        <div id="completedCard" class="hidden flex-1 flex flex-col items-center justify-center text-center">
+            <div class="w-24 h-24 rounded-full bg-emerald-500/20 flex items-center justify-center mb-6">
+                <span class="material-icons-round text-5xl text-emerald-400">check_circle</span>
+            </div>
+            <h2 class="text-2xl font-bold mb-2">太棒了！</h2>
+            <p id="completedMsg" class="text-slate-400 mb-8">本轮刷词已完成</p>
+            <button onclick="window.location.href='/dashboard'"
+                class="px-8 py-4 bg-primary text-white rounded-xl font-semibold hover:brightness-110 transition-all">
+                返回仪表盘
+            </button>
+        </div>
+    </main>
+
+    <!-- Footer Buttons - 刷新词模式 -->
+    <footer id="actionButtons"
+        class="fixed bottom-0 left-0 right-0 p-4 pb-8 flex gap-4 bg-gradient-to-t from-background-dark via-background-dark to-transparent z-50">
+        <button id="btnKnown" onclick="markKnown()"
+            class="flex-1 flex flex-col items-center gap-2 group active:scale-95 transition-transform">
+            <span class="text-lg font-medium text-white">认识</span>
+            <div class="h-1.5 w-8 rounded-full bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.5)]"></div>
+        </button>
+        <button id="btnUnknown" onclick="markUnknown()"
+            class="flex-1 flex flex-col items-center gap-2 group active:scale-95 transition-transform">
+            <span class="text-lg font-medium text-white">不认识</span>
+            <div class="h-1.5 w-8 rounded-full bg-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.5)]"></div>
+        </button>
+    </footer>
+
+    <!-- Footer Buttons - 不认识详情模式（只有下一词） -->
+    <!-- Footer Buttons - 不认识详情模式（只有下一词） -->
+    <!-- Footer Buttons - 不认识详情模式（只有下一词） -->
+    <footer id="unknownDetailButtons"
+        class="hidden fixed bottom-0 left-0 right-0 p-4 pb-8 flex items-center justify-center gap-4 bg-gradient-to-t from-background-dark via-background-dark to-transparent z-50">
+        <button onclick="goToNextWord()"
+            class="flex flex-col items-center gap-2 group active:scale-95 transition-transform">
+            <span class="text-lg font-medium text-accent-teal">下一词</span>
+            <div class="h-1.5 w-12 rounded-full bg-accent-teal shadow-[0_0_12px_rgba(38,198,218,0.5)]"></div>
+        </button>
+    </footer>
+
+    <!-- Footer Buttons - 认识详情模式（下一词 + 记错了） -->
+    <!-- Footer Buttons - 认识详情模式（下一词 + 记错了） -->
+    <!-- Footer Buttons - 认识详情模式（下一词 + 记错了） -->
+    <footer id="knownDetailButtons"
+        class="hidden fixed bottom-0 left-0 right-0 p-4 pb-8 flex gap-4 bg-gradient-to-t from-background-dark via-background-dark to-transparent z-50">
+        <button onclick="goToNextWord()"
+            class="flex-1 flex flex-col items-center gap-2 group active:scale-95 transition-transform">
+            <span class="text-lg font-medium text-accent-teal">下一词</span>
+            <div class="h-1.5 w-8 rounded-full bg-accent-teal shadow-[0_0_12px_rgba(38,198,218,0.5)]"></div>
+        </button>
+        <button onclick="markAsMistake()"
+            class="flex-1 flex flex-col items-center gap-2 group active:scale-95 transition-transform">
+            <span class="text-lg font-medium text-rose-400">记错了</span>
+            <div class="h-1.5 w-8 rounded-full bg-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.5)]"></div>
+        </button>
+    </footer>
+
+    <!-- Footer Buttons - 刷错词模式（只有认识） -->
+    <!-- Footer Buttons - 刷错词模式（只有认识） -->
+    <!-- Footer Buttons - 刷错词模式（只有认识） -->
+    <footer id="mistakeButtons"
+        class="hidden fixed bottom-0 left-0 right-0 p-4 pb-8 flex items-center justify-center gap-4 bg-gradient-to-t from-background-dark via-background-dark to-transparent z-50">
+        <button onclick="markKnown()"
+            class="flex flex-col items-center gap-2 group active:scale-95 transition-transform">
+            <span class="text-lg font-medium text-white">认识了</span>
+            <div class="h-1.5 w-12 rounded-full bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.5)]"></div>
+        </button>
+    </footer>
+
+
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const mode = urlParams.get('mode') || 'study';
+        const wordbookId = urlParams.get('wordbookId');
+
+        let currentWord = null;
+        let isShowingDetail = false;
+        let speechSynthesis = window.speechSynthesis;
+        let voices = [];
+
+        // 获取美式英语声音
+        function loadVoices() {
+            voices = speechSynthesis.getVoices();
+        }
+        speechSynthesis.onvoiceschanged = loadVoices;
+        loadVoices();
+
+        // 返回上一页
+        function goBack() {
+            if (isShowingDetail) {
+                // 如果正在显示详情，返回到问答模式
+                hideDetail();
+                loadNextWord();
+            } else {
+                window.location.href = '/dashboard';
+            }
+        }
+
+        // 发音（使用有道词典音频 - 美式发音）
+        let audioPlayer = null;
+
+        function speakWord() {
+            if (!currentWord) return;
+
+            // 停止之前的播放
+            if (audioPlayer) {
+                audioPlayer.pause();
+                audioPlayer = null;
+            }
+
+            // 有道词典美式发音 type=2
+            const audioUrl = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(currentWord.word)}&type=2`;
+
+            audioPlayer = new Audio(audioUrl);
+            audioPlayer.play().catch(err => {
+                console.log('有道发音失败，使用本地TTS:', err);
+                // 降级到本地TTS
+                fallbackSpeak();
+            });
+        }
+
+        // 降级方案：本地TTS
+        function fallbackSpeak() {
+            if (!currentWord) return;
+            speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(currentWord.word);
+            utterance.lang = 'en-US';
+            utterance.rate = 0.9;
+            speechSynthesis.speak(utterance);
+        }
+
+        // 加载下一个单词
+        async function loadNextWord() {
+            const endpoint = mode === 'mistakes' ? '/api/mistakes/next' : `/api/study/next?wordbookId=${wordbookId}`;
+
+            try {
+                const res = await fetch(endpoint);
+                const data = await res.json();
+
+                if (data.completed) {
+                    showCompleted();
+                    return;
+                }
+
+                currentWord = data.word;
+                isShowingDetail = false;
+
+                // 更新进度
+                if (mode === 'mistakes') {
+                    document.getElementById('progress').textContent = `剩余 ${data.remaining} 词`;
+                } else {
+                    document.getElementById('progress').textContent = `${data.progress.current}/${data.progress.total}`;
+                }
+
+                // 动画效果
+                const card = document.getElementById('wordCard');
+                card.classList.remove('slide-in', 'hidden');
+                void card.offsetWidth; // 触发重排
+                card.classList.add('slide-in');
+
+                document.getElementById('wordText').textContent = currentWord.word;
+
+                // 显示正确的按钮
+                showQuizButtons();
+
+                // 自动发音
+                setTimeout(speakWord, 300);
+
+            } catch (error) {
+                console.error('加载单词失败:', error);
+            }
+        }
+
+        // 显示问答模式按钮
+        function showQuizButtons() {
+            document.getElementById('detailCard').classList.add('hidden');
+            document.getElementById('wordCard').classList.remove('hidden');
+            document.getElementById('unknownDetailButtons').classList.add('hidden');
+            document.getElementById('knownDetailButtons').classList.add('hidden');
+            document.getElementById('mistakeButtons').classList.add('hidden');
+
+            // 两种模式都显示认识和不认识按钮
+            document.getElementById('actionButtons').classList.remove('hidden');
+        }
+
+        // 词典数据缓存
+        let dictData = null;
+        let dictAudioUrl = null;
+        let isKnownMode = false; // 是否是认识模式
+
+        // 显示详情模式
+        async function showDetail(isKnown = false) {
+            isShowingDetail = true;
+            isKnownMode = isKnown;
+
+            document.getElementById('wordCard').classList.add('hidden');
+            document.getElementById('detailCard').classList.remove('hidden');
+            document.getElementById('detailWord').textContent = currentWord.word;
+
+            // 隐藏所有按钮
+            document.getElementById('actionButtons').classList.add('hidden');
+            document.getElementById('mistakeButtons').classList.add('hidden');
+            document.getElementById('unknownDetailButtons').classList.add('hidden');
+            document.getElementById('knownDetailButtons').classList.add('hidden');
+
+            // 根据模式显示对应按钮
+            if (isKnown) {
+                // 认识模式：显示 下一词 + 记错了
+                document.getElementById('knownDetailButtons').classList.remove('hidden');
+                // 隐藏加入错词本提示
+                document.getElementById('mistakeTip').classList.add('hidden');
+            } else {
+                // 不认识模式：只显示下一词
+                document.getElementById('unknownDetailButtons').classList.remove('hidden');
+                // 刷错词模式隐藏加入错词本提示
+                if (mode === 'mistakes') {
+                    document.getElementById('mistakeTip').classList.add('hidden');
+                } else {
+                    document.getElementById('mistakeTip').classList.remove('hidden');
+                }
+            }
+
+            // 显示加载中
+            document.getElementById('phonetic').textContent = '';
+            document.getElementById('definitionArea').innerHTML = '<div class="text-slate-400 text-sm">正在加载释义...</div>';
+            document.getElementById('exampleArea').classList.add('hidden');
+
+            // 获取词典数据
+            await loadDictionary(currentWord.word);
+        }
+
+        // 调用有道词典获取中文释义
+        async function loadDictionary(word) {
+            try {
+                // 使用有道词典API获取中文释义
+                const res = await fetch(`/api/dict/${encodeURIComponent(word)}`);
+
+                if (!res.ok) {
+                    showDictError();
+                    speakWord(); // 播放发音
+                    return;
+                }
+
+                const data = await res.json();
+
+                // 显示音标
+                document.getElementById('phonetic').textContent = data.phonetic || '';
+
+                // 显示释义
+                if (data.translation && data.translation.length > 0) {
+                    let defHtml = '';
+                    data.translation.forEach(t => {
+                        defHtml += `<p class="text-slate-200 text-base mb-2">${t}</p>`;
+                    });
+                    document.getElementById('definitionArea').innerHTML = defHtml;
+                } else {
+                    showDictError();
+                }
+
+                // 显示例句（如果有）
+                if (data.example) {
+                    document.getElementById('exampleText').textContent = data.example;
+                    document.getElementById('exampleArea').classList.remove('hidden');
+                }
+
+                // 播放有道发音
+                speakWord();
+
+            } catch (error) {
+                console.error('词典API错误:', error);
+                showDictError();
+                speakWord();
+            }
+        }
+
+        // 显示词典错误
+        function showDictError() {
+            document.getElementById('definitionArea').innerHTML = `
+                <div class="text-slate-400 text-sm">未找到释义</div>
+                <div class="text-slate-500 text-xs mt-1">可查阅其他词典了解含义</div>
+            `;
+        }
+
+        // 隐藏详情模式
+        function hideDetail() {
+            isShowingDetail = false;
+            isKnownMode = false;
+            document.getElementById('detailCard').classList.add('hidden');
+            document.getElementById('unknownDetailButtons').classList.add('hidden');
+            document.getElementById('knownDetailButtons').classList.add('hidden');
+        }
+
+        // 标记为认识（显示详情页）
+        async function markKnown() {
+            if (!currentWord) return;
+
+            // 调用API标记为认识
+            const endpoint = mode === 'mistakes' ? '/api/mistakes/known' : '/api/study/known';
+            await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ wordId: currentWord.id })
+            });
+
+            // 显示详情页（认识模式）
+            showDetail(true);
+        }
+
+        // 标记为不认识
+        async function markUnknown() {
+            if (!currentWord) return;
+
+            // 刷新词模式：调用API加入错词本
+            if (mode === 'study') {
+                await fetch('/api/study/unknown', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ wordId: currentWord.id })
+                });
+            }
+            // 刷错词模式：不需要调用API（已经在错词本了）
+
+            // 显示详情页面（不认识模式）
+            showDetail(false);
+        }
+
+        // 点击"记错了"（从认识详情页）
+        async function markAsMistake() {
+            if (!currentWord) return;
+
+            // 加入错词本
+            await fetch('/api/study/unknown', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ wordId: currentWord.id })
+            });
+
+            // 跳到下一个词
+            goToNextWord();
+        }
+
+        // 点击下一词（从详情页继续）
+        async function goToNextWord() {
+            const card = document.getElementById('detailCard');
+            card.classList.add('slide-out-left');
+
+            // 不认识模式下需要调用API确保跳过当前单词
+            if (!isKnownMode) {
+                if (mode === 'mistakes') {
+                    // 刷错词：跳过当前词（移到队列末尾）
+                    await fetch('/api/mistakes/skip', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ wordId: currentWord.id })
+                    });
+                } else {
+                    // 刷新词：标记为已学（虽然不认识，但本轮不再显示）
+                    await fetch('/api/study/known', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ wordId: currentWord.id })
+                    });
+                }
+            }
+
+            setTimeout(() => {
+                card.classList.remove('slide-out-left');
+                hideDetail();
+                loadNextWord();
+            }, 300);
+        }
+
+        // 显示完成界面
+        function showCompleted() {
+            document.getElementById('wordCard').classList.add('hidden');
+            document.getElementById('detailCard').classList.add('hidden');
+            document.getElementById('actionButtons').classList.add('hidden');
+            document.getElementById('mistakeButtons').classList.add('hidden');
+            document.getElementById('unknownDetailButtons').classList.add('hidden');
+            document.getElementById('knownDetailButtons').classList.add('hidden');
+            document.getElementById('completedCard').classList.remove('hidden');
+
+            if (mode === 'mistakes') {
+                document.getElementById('completedMsg').textContent = '错词已全部复习完成！';
+            }
+        }
+
+        // 检查登录状态
+        async function checkAuth() {
+            const res = await fetch('/api/check-auth');
+            const data = await res.json();
+            if (!data.authenticated) {
+                window.location.href = '/';
+            }
+        }
+
+        // 初始化
+        async function init() {
+            await checkAuth();
+            loadNextWord();
+        }
+
+        // 全屏切换
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.log('全屏请求失败:', err);
+                });
+                document.getElementById('fullscreenIcon').textContent = 'fullscreen_exit';
+            } else {
+                document.exitFullscreen();
+                document.getElementById('fullscreenIcon').textContent = 'fullscreen';
+            }
+        }
+
+        // 监听全屏变化
+        document.addEventListener('fullscreenchange', () => {
+            const icon = document.getElementById('fullscreenIcon');
+            if (document.fullscreenElement) {
+                icon.textContent = 'fullscreen_exit';
+            } else {
+                icon.textContent = 'fullscreen';
+            }
+        });
+
+        init();
+    </script>
+</body>
+
+</html>

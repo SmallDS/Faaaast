@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html class="dark" lang="zh-CN">
+
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport" />
+    <title>速刷单词 - 仪表盘</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com" rel="preconnect" />
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        primary: "#f59e0b",
+                        "accent-teal": "#26c6da",
+                        "background-dark": "#1e212f",
+                        "card-dark": "#2d3248",
+                        "surface-dark": "#2d3446",
+                    },
+                    fontFamily: {
+                        display: ["Inter", "system-ui", "sans-serif"],
+                    },
+                    borderRadius: {
+                        DEFAULT: "12px",
+                        'pill': "9999px",
+                    },
+                },
+            },
+        };
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+    </style>
+</head>
+
+<body class="bg-background-dark text-slate-100 min-h-screen flex flex-col">
+    <!-- Header -->
+    <header class="flex items-center justify-between px-6 py-4">
+        <button onclick="logout()" class="p-2 -ml-2 text-slate-400 hover:text-white transition-colors">
+            <span class="material-icons-round">logout</span>
+        </button>
+        </div>
+        <div class="flex items-center gap-4">
+            <a href="/market.html" class="text-slate-400 hover:text-white transition-colors flex items-center gap-1"
+                title="词书市场">
+                <span class="material-icons-round">storefront</span>
+            </a>
+            <a href="/admin.html" id="adminLink"
+                class="hidden text-rose-400 hover:text-rose-300 transition-colors flex items-center gap-1" title="管理后台">
+                <span class="material-icons-round">admin_panel_settings</span>
+            </a>
+            <button class="p-2 text-slate-400 hover:text-white transition-colors"
+                onclick="document.getElementById('uploadModal').classList.remove('hidden')">
+                <span class="material-icons-round">add_circle_outline</span>
+            </button>
+            <button class="p-2 text-slate-400 hover:text-white transition-colors">
+                <span class="material-icons-round">settings</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 px-4 space-y-4 pb-40">
+        <!-- 词书卡片 -->
+        <div id="wordbookCard" class="bg-card-dark rounded-3xl p-6 shadow-xl flex flex-col items-center">
+            <!-- 无词书时 -->
+            <div id="noWordbook" class="py-10 text-center">
+                <div class="w-24 h-24 mx-auto mb-4 rounded-2xl bg-surface-dark flex items-center justify-center">
+                    <span class="material-icons-round text-4xl text-slate-500">menu_book</span>
+                </div>
+                <h2 class="text-lg font-medium text-slate-400 mb-4">暂无词书</h2>
+                <button onclick="document.getElementById('uploadModal').classList.remove('hidden')"
+                    class="px-6 py-3 bg-primary text-white rounded-xl font-medium hover:brightness-110 transition-all">
+                    <span class="material-icons-round text-lg align-middle mr-1">upload_file</span>
+                    导入TXT词书
+                </button>
+            </div>
+
+            <!-- 有词书时 -->
+            <div id="hasWordbook" class="hidden w-full">
+                <div class="flex flex-col items-center mb-6">
+                    <div
+                        class="w-28 h-40 bg-primary rounded-lg shadow-lg relative overflow-hidden flex flex-col items-center pt-4 mb-4">
+                        <span class="text-white font-bold text-sm tracking-wider relative z-10">VOCABULARY</span>
+                        <div class="absolute inset-0 pt-10">
+                            <div class="grid grid-cols-2 gap-0 h-full opacity-40">
+                                <div class="bg-orange-600 rounded-full w-10 h-10 -ml-2 -mt-2"></div>
+                                <div class="bg-orange-300 w-8 h-8 ml-2 mt-4"></div>
+                                <div class="bg-orange-400 w-full h-10 col-span-2"></div>
+                                <div class="bg-orange-200 rounded-full w-12 h-12 -mr-4 -mb-4 justify-self-end self-end">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <h2 id="wordbookName" class="text-xl font-bold mb-1">词书名称</h2>
+                    <button onclick="openSwitchModal()"
+                        class="text-xs text-slate-400 flex items-center hover:opacity-80 transition-opacity">
+                        换本词书 <span class="material-icons-round text-xs ml-0.5">chevron_right</span>
+                    </button>
+                </div>
+
+                <!-- 进度条 -->
+                <div class="w-full mt-6">
+                    <div class="w-full h-2 bg-slate-700/50 rounded-full overflow-hidden">
+                        <div id="progressBar" class="h-full bg-emerald-400 rounded-full transition-all duration-500"
+                            style="width: 0%"></div>
+                    </div>
+                    <div class="flex justify-between mt-3 text-sm">
+                        <span id="progressPercent" class="text-emerald-400 font-medium">0%</span>
+                        <span id="progressCount" class="text-slate-400">0/0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 错词本入口 -->
+        <div onclick="window.location.href='/mistakes'"
+            class="bg-card-dark rounded-2xl p-5 flex items-center justify-between shadow-lg cursor-pointer hover:bg-surface-dark transition-colors">
+            <div class="flex items-center gap-3">
+                <span class="material-icons-round text-rose-400">bookmark</span>
+                <span class="text-base font-medium">错词本</span>
+            </div>
+            <button class="text-sm text-slate-400 flex items-center">
+                <span id="mistakeCount">0</span> 词 <span class="material-icons-round text-sm ml-1">chevron_right</span>
+            </button>
+        </div>
+
+        <!-- 使用说明 -->
+        <div class="bg-card-dark rounded-2xl p-5 shadow-lg">
+            <h3 class="font-medium mb-3 flex items-center gap-2">
+                <span class="material-icons-round text-primary text-lg">info</span>
+                使用说明
+            </h3>
+            <ul class="text-sm text-slate-400 space-y-2">
+                <li>• <span class="text-emerald-400">认识</span>：单词非常熟悉，确定不再需要复习</li>
+                <li>• <span class="text-rose-400">不认识</span>：单词会自动归入错词本</li>
+                <li>• 刷错词前，建议先在错词本中自查巩固</li>
+                <li>• 错词点「认识」即视为本轮学习完成</li>
+            </ul>
+        </div>
+    </main>
+
+    <!-- 底部按钮 -->
+    <footer
+        class="fixed bottom-0 left-0 right-0 p-4 pb-8 flex gap-4 bg-gradient-to-t from-background-dark via-background-dark to-transparent">
+        <button id="btnStudy" onclick="startStudy()"
+            class="flex-1 bg-accent-teal hover:brightness-110 active:scale-[0.98] transition-all rounded-pill py-4 flex flex-col items-center justify-center text-white shadow-lg shadow-accent-teal/20 disabled:opacity-50 disabled:cursor-not-allowed">
+            <span class="text-lg font-bold leading-tight">刷新词</span>
+            <span id="pendingCount" class="text-xs opacity-90 font-medium">待刷 0 词</span>
+        </button>
+        <button id="btnMistakes" onclick="startMistakes()"
+            class="flex-1 bg-primary hover:brightness-110 active:scale-[0.98] transition-all rounded-pill py-4 flex flex-col items-center justify-center text-white shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed">
+            <span class="text-lg font-bold leading-tight">刷错词</span>
+            <span id="mistakeCountBtn" class="text-xs opacity-90 font-medium">还剩 0 词</span>
+        </button>
+    </footer>
+
+    <!-- 上传弹窗 -->
+    <div id="uploadModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+        <div class="bg-card-dark rounded-3xl p-6 w-full max-w-md shadow-2xl">
+            <div class="flex items-center justify-between mb-6">
+                <h3 class="text-lg font-bold">导入TXT词书</h3>
+                <button onclick="document.getElementById('uploadModal').classList.add('hidden')"
+                    class="text-slate-400 hover:text-white">
+                    <span class="material-icons-round">close</span>
+                </button>
+            </div>
+            <form id="uploadForm" class="space-y-4">
+                <div>
+                    <label class="block text-sm text-slate-400 mb-2">词书名称</label>
+                    <input type="text" name="name" required
+                        class="w-full bg-surface-dark border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                        placeholder="例如：专升本全部词">
+                </div>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-2">TXT文件 <span class="text-xs">(每行一个单词)</span></label>
+                    <input type="file" name="txt" accept=".txt" required
+                        class="w-full bg-surface-dark border border-slate-700 rounded-xl px-4 py-3 text-white file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-primary file:text-white file:font-medium hover:file:brightness-110">
+                </div>
+                <button type="submit" id="uploadBtn"
+                    class="w-full bg-primary hover:brightness-110 text-white font-semibold py-4 rounded-xl shadow-lg shadow-primary/20 transition-all active:scale-[0.98] disabled:opacity-50">
+                    开始导入
+                </button>
+            </form>
+            <div id="uploadStatus" class="mt-4 text-center text-sm hidden"></div>
+        </div>
+    </div>
+
+    <!-- 换书弹窗 -->
+    <div id="switchWordbookModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
+        <div class="bg-card-dark rounded-3xl p-6 w-full max-w-md shadow-2xl h-[80vh] flex flex-col">
+            <div class="flex items-center justify-between mb-6">
+                <h3 class="text-lg font-bold">切换词书</h3>
+                <button onclick="document.getElementById('switchWordbookModal').classList.add('hidden')"
+                    class="text-slate-400 hover:text-white">
+                    <span class="material-icons-round">close</span>
+                </button>
+            </div>
+            <div id="wordbookList" class="flex-1 overflow-y-auto space-y-3 pr-2">
+                <!-- 列表动态加载 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentWordbook = null;
+
+        // 检查登录状态
+        async function checkAuth() {
+            const res = await fetch('/api/check-auth');
+            const data = await res.json();
+            if (!data.authenticated) {
+                window.location.href = '/';
+            }
+        }
+
+        // 加载数据
+        async function loadData() {
+            await checkAuth();
+
+            // 检查角色显示入口
+            try {
+                const userRes = await fetch('/api/auth/me');
+                if (userRes.ok) {
+                    const user = await userRes.json();
+                    if (user.role === 'admin') {
+                        document.getElementById('adminLink').classList.remove('hidden');
+                    }
+                }
+            } catch (e) { }
+
+            await loadWordbooks();
+            await loadMistakeCount();
+        }
+
+        // 加载词书
+        async function loadWordbooks() {
+            const res = await fetch('/api/wordbooks');
+            const wordbooks = await res.json();
+            window.allWordbooks = wordbooks;
+
+            if (wordbooks.length > 0) {
+                // 如果没有当前选中的，默认选第一个
+                if (!currentWordbook) {
+                    currentWordbook = wordbooks[0];
+                } else {
+                    // 如果有选中的，更新数据
+                    const found = wordbooks.find(w => w.id === currentWordbook.id);
+                    if (found) currentWordbook = found;
+                }
+
+                renderCurrentWordbook();
+            } else {
+                document.getElementById('noWordbook').classList.remove('hidden');
+                document.getElementById('hasWordbook').classList.add('hidden');
+                document.getElementById('btnStudy').disabled = true;
+            }
+        }
+
+        // 渲染当前词书
+        function renderCurrentWordbook() {
+            document.getElementById('noWordbook').classList.add('hidden');
+            document.getElementById('hasWordbook').classList.remove('hidden');
+            document.getElementById('wordbookName').textContent = currentWordbook.name;
+
+            const learned = currentWordbook.learned_count || 0;
+            const total = currentWordbook.total_words;
+            const pending = total - learned;
+            const percent = total > 0 ? ((learned / total) * 100).toFixed(2) : 0;
+
+            document.getElementById('progressBar').style.width = percent + '%';
+            document.getElementById('progressPercent').textContent = percent + '%';
+            document.getElementById('progressCount').textContent = `${learned}/${total}`;
+            document.getElementById('pendingCount').textContent = `待刷 ${pending} 词`;
+
+            document.getElementById('btnStudy').disabled = pending === 0;
+        }
+
+        // 打开切换弹窗
+        function openSwitchModal() {
+            const list = document.getElementById('wordbookList');
+            const uploadedBooks = window.allWordbooks.filter(b => !b.is_cloned);
+            const marketBooks = window.allWordbooks.filter(b => b.is_cloned);
+
+            let html = '';
+
+            // 渲染列表项的辅助函数
+            const renderBook = (book) => `
+                <div onclick="selectWordbook(${book.id})" 
+                    class="p-4 rounded-xl border border-white/5 bg-surface-dark hover:border-primary/50 cursor-pointer transition-all flex items-center justify-between group ${book.id === currentWordbook?.id ? 'border-primary bg-primary/5' : ''}">
+                    <div>
+                        <div class="font-bold text-white mb-1 group-hover:text-primary transition-colors">${book.name}</div>
+                        <div class="text-xs text-slate-400">${book.learned_count || 0} / ${book.total_words} 词</div>
+                    </div>
+                    ${book.id === currentWordbook?.id ? '<span class="material-icons-round text-primary">check_circle</span>' : ''}
+                </div>
+            `;
+
+            if (uploadedBooks.length > 0) {
+                html += `<div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 mt-2 px-1">我的上传</div>`;
+                html += uploadedBooks.map(renderBook).join('');
+            }
+
+            if (marketBooks.length > 0) {
+                html += `<div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 mt-6 px-1">来自市场</div>`;
+                html += marketBooks.map(renderBook).join('');
+            }
+
+            if (window.allWordbooks.length === 0) {
+                html = '<div class="text-center text-slate-500 py-10">暂无词书</div>';
+            }
+
+            list.innerHTML = html;
+            document.getElementById('switchWordbookModal').classList.remove('hidden');
+        }
+
+        // 选择词书
+        async function selectWordbook(id) {
+            const book = window.allWordbooks.find(w => w.id === id);
+            if (!book) return;
+
+            document.getElementById('switchWordbookModal').classList.add('hidden');
+
+            // 如果选择了还没学完的词书（或者已经学了一些的）
+            if (book.learned_count > 0) {
+                if (confirm(`检测到该词书已有进度 (${book.learned_count}/${book.total_words})\n\n点击【确定】继续学习剩余单词\n点击【取消】重置进度，重新开始整本`)) {
+                    // 继续学习
+                    currentWordbook = book;
+                    renderCurrentWordbook();
+                } else {
+                    // 重置进度
+                    if (confirm('确定要重置由于该词书的所有学习记录吗？此操作无法撤销。')) {
+                        try {
+                            const res = await fetch(`/api/wordbooks/${book.id}/reset`, { method: 'POST' });
+                            if (res.ok) {
+                                alert('进度已重置');
+                                loadData(); // 重新加载数据
+                            }
+                        } catch (e) {
+                            alert('操作失败');
+                        }
+                    }
+                }
+            } else {
+                currentWordbook = book;
+                renderCurrentWordbook();
+            }
+        }
+
+        // 加载错词数量
+        async function loadMistakeCount() {
+            const res = await fetch('/api/mistakes/count');
+            const data = await res.json();
+            document.getElementById('mistakeCount').textContent = data.count;
+            document.getElementById('mistakeCountBtn').textContent = `还剩 ${data.count} 词`;
+            document.getElementById('btnMistakes').disabled = data.count === 0;
+        }
+
+        // 开始刷新词
+        function startStudy() {
+            if (currentWordbook) {
+                window.location.href = `/flashcard?mode=study&wordbookId=${currentWordbook.id}`;
+            }
+        }
+
+        // 开始刷错词
+        function startMistakes() {
+            window.location.href = '/flashcard?mode=mistakes';
+        }
+
+        // 退出登录
+        async function logout() {
+            await fetch('/api/logout', { method: 'POST' });
+            window.location.href = '/';
+        }
+
+        // 上传词书
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('uploadBtn');
+            const status = document.getElementById('uploadStatus');
+
+            btn.disabled = true;
+            btn.textContent = '上传中...';
+            status.classList.remove('hidden', 'text-emerald-400', 'text-rose-400');
+            status.textContent = '正在解析TXT文件...';
+            status.classList.add('text-slate-400');
+
+            const formData = new FormData(e.target);
+
+            try {
+                const res = await fetch('/api/wordbooks/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    status.textContent = `导入成功！共 ${data.wordCount} 个单词`;
+                    status.classList.remove('text-slate-400');
+                    status.classList.add('text-emerald-400');
+                    setTimeout(() => {
+                        document.getElementById('uploadModal').classList.add('hidden');
+                        loadData();
+                    }, 1500);
+                } else {
+                    status.textContent = data.error;
+                    status.classList.remove('text-slate-400');
+                    status.classList.add('text-rose-400');
+                }
+            } catch (error) {
+                status.textContent = '上传失败，请重试';
+                status.classList.remove('text-slate-400');
+                status.classList.add('text-rose-400');
+            }
+
+            btn.disabled = false;
+            btn.textContent = '开始导入';
+        });
+
+        // 初始化
+        loadData();
+    </script>
+</body>
+
+</html>

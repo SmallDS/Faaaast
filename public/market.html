@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>词书市场 - 速刷单词</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#6366f1',
+                        'primary-dark': '#4f46e5',
+                        'background-dark': '#0f172a',
+                        'surface-dark': '#1e293b',
+                        'card-dark': '#334155',
+                        'accent-teal': '#2dd4bf',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+    </style>
+</head>
+
+<body class="bg-background-dark text-slate-100 min-h-screen">
+    <!-- Header -->
+    <header
+        class="px-6 h-16 flex items-center justify-between border-b border-white/5 bg-background-dark/50 backdrop-blur-md sticky top-0 z-50">
+        <div class="flex items-center gap-3">
+            <button onclick="window.location.href='/dashboard'"
+                class="text-slate-400 hover:text-white transition-colors">
+                <span class="material-icons-round">arrow_back</span>
+            </button>
+            <h1 class="text-lg font-bold">词书市场</h1>
+        </div>
+    </header>
+
+    <main class="p-6 max-w-4xl mx-auto">
+        <div id="marketList" class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <!-- 动态加载 -->
+            <div class="text-slate-400 text-center col-span-full py-10">加载中...</div>
+        </div>
+    </main>
+
+    <script>
+        // 检查登录
+        async function checkAuth() {
+            const res = await fetch('/api/auth/me');
+            if (res.status === 401) {
+                window.location.href = '/';
+            }
+        }
+
+        // 加载市场词书
+        async function loadMarket() {
+            try {
+                const res = await fetch('/api/market');
+                const books = await res.json();
+
+                const container = document.getElementById('marketList');
+
+                if (books.length === 0) {
+                    container.innerHTML = `
+                        <div class="col-span-full flex flex-col items-center justify-center py-20 text-slate-500">
+                            <span class="material-icons-round text-5xl mb-4">storefront</span>
+                            <p>市场暂无公开词书</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                container.innerHTML = books.map(book => `
+                    <div class="bg-surface-dark rounded-2xl p-5 border border-white/5 hover:border-primary/30 transition-all flex flex-col">
+                        <div class="flex items-start justify-between mb-4">
+                            <div class="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400">
+                                <span class="material-icons-round">book</span>
+                            </div>
+                            <span class="text-xs font-medium bg-slate-700/50 text-slate-400 px-2 py-1 rounded-md">
+                                ${book.creator_name}
+                            </span>
+                        </div>
+                        
+                        <h3 class="text-lg font-bold text-white mb-1 truncate">${book.name}</h3>
+                        <p class="text-sm text-slate-400 mb-6">${book.total_words} 单词</p>
+                        
+                        <button onclick="cloneBook(${book.id})" 
+                            class="mt-auto w-full py-2.5 bg-primary/10 hover:bg-primary hover:text-white text-primary rounded-xl font-medium transition-all flex items-center justify-center gap-2 group">
+                            <span class="material-icons-round text-sm group-hover:scale-110 transition-transform">add_circle_outline</span>
+                            获取词书
+                        </button>
+                    </div>
+                `).join('');
+
+            } catch (error) {
+                console.error('加载失败:', error);
+            }
+        }
+
+        // 获取词书
+        async function cloneBook(id) {
+            if (!confirm('确定要获取这本词书吗？')) return;
+
+            try {
+                const res = await fetch('/api/market/clone', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ wordbookId: id })
+                });
+
+                if (res.ok) {
+                    alert('获取成功！已添加到您的书架。');
+                    window.location.href = '/dashboard';
+                } else {
+                    alert('获取失败，请重试');
+                }
+            } catch (error) {
+                console.error('获取失败:', error);
+                alert('系统错误');
+            }
+        }
+
+        checkAuth();
+        loadMarket();
+    </script>
+</body>
+
+</html>
