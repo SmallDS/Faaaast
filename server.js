@@ -104,6 +104,40 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
     res.json(user);
 });
 
+// 更新用户信息
+app.post('/api/auth/profile', requireAuth, async (req, res) => {
+    try {
+        const { username, password } = req.body;
+        const userId = req.session.userId;
+
+        // 1. 检查用户名是否重复 (如果改了用户名)
+        if (username) {
+            const current = get('SELECT username FROM users WHERE id = ?', [userId]);
+            if (current.username !== username) {
+                const existing = get('SELECT id FROM users WHERE username = ?', [username]);
+                if (existing) {
+                    return res.status(400).json({ error: '用户名已存在' });
+                }
+                run('UPDATE users SET username = ? WHERE id = ?', [username, userId]);
+            }
+        }
+
+        // 2. 更新密码
+        if (password) {
+            if (password.length < 6) {
+                return res.status(400).json({ error: '密码至少6位' });
+            }
+            const hash = await bcrypt.hash(password, 10);
+            run('UPDATE users SET password_hash = ? WHERE id = ?', [hash, userId]);
+        }
+
+        res.json({ success: true, message: '个人信息已更新' });
+    } catch (e) {
+        console.error('更新信息失败:', e);
+        res.status(500).json({ error: '更新失败' });
+    }
+});
+
 // 退出登录
 app.post('/api/logout', (req, res) => {
     req.session.destroy();
@@ -227,6 +261,52 @@ app.post('/api/wordbooks/:id/reset', requireAuth, (req, res) => {
     } catch (error) {
         console.error('重置进度失败:', error);
         res.status(500).json({ error: '重置失败' });
+    }
+});
+
+// 重命名词书 (仅所有者)
+app.post('/api/wordbooks/:id/rename', requireAuth, (req, res) => {
+    const wordbookId = req.params.id;
+    const { name } = req.body;
+
+    if (!name) return res.status(400).json({ error: '名称不能为空' });
+
+    const rel = get('SELECT role FROM user_wordbooks WHERE wordbook_id = ? AND user_id = ?',
+        [wordbookId, req.session.userId]);
+
+    if (!rel || rel.role !== 'owner') {
+        return res.status(403).json({ error: '只有创建者可以重命名词书' });
+    }
+
+    run('UPDATE wordbooks SET name = ? WHERE id = ?', [name, wordbookId]);
+    res.json({ success: true });
+});
+
+// 删除词书 (所有者:删除全部; 订阅者:取消订阅)
+app.delete('/api/wordbooks/:id', requireAuth, (req, res) => {
+    const wordbookId = req.params.id;
+
+    const rel = get('SELECT role FROM user_wordbooks WHERE wordbook_id = ? AND user_id = ?',
+        [wordbookId, req.session.userId]);
+
+    if (!rel) {
+        return res.status(404).json({ error: '词书不存在' });
+    }
+
+    try {
+        if (rel.role === 'owner') {
+            // 是所有者，物理删除词书 (级联会删除 words, progress 等)
+            run('DELETE FROM wordbooks WHERE id = ?', [wordbookId]);
+            res.json({ success: true, message: '词书已永久删除' });
+        } else {
+            // 是订阅者，仅删除关联
+            run('DELETE FROM user_wordbooks WHERE wordbook_id = ? AND user_id = ?',
+                [wordbookId, req.session.userId]);
+            res.json({ success: true, message: '已取消关注该词书' });
+        }
+    } catch (e) {
+        console.error('删除词书失败:', e);
+        res.status(500).json({ error: '删除失败' });
     }
 });
 
