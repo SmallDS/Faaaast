@@ -2,6 +2,7 @@ const express = require('express');
 const session = require('express-session');
 const path = require('path');
 const multer = require('multer');
+const fs = require('fs');
 const { initDatabase, get, all, run, batchInsert } = require('./db/database');
 const bcrypt = require('bcryptjs');
 
@@ -117,6 +118,7 @@ app.get('/api/check-auth', (req, res) => {
 // ==================== 词书API ====================
 
 // 上传TXT词书
+// 上传TXT词书
 app.post('/api/wordbooks/upload', requireAuth, upload.single('txt'), async (req, res) => {
     try {
         if (!req.file) {
@@ -137,10 +139,14 @@ app.post('/api/wordbooks/upload', requireAuth, upload.single('txt'), async (req,
             return res.status(400).json({ error: 'TXT文件中未找到有效单词' });
         }
 
-        // 创建词书
+        // 创建词书 (user_id 仍作为 创建者 记录，但权限看 user_wordbooks)
         const result = run('INSERT INTO wordbooks (user_id, name, total_words) VALUES (?, ?, ?)',
             [req.session.userId, bookName, words.length]);
         const wordbookId = result.lastInsertRowid;
+
+        // [Stage 2] 添加所有者关联
+        run('INSERT INTO user_wordbooks (user_id, wordbook_id, role) VALUES (?, ?, ?)',
+            [req.session.userId, wordbookId, 'owner']);
 
         // 批量插入单词
         batchInsert(wordbookId, words);
@@ -152,34 +158,46 @@ app.post('/api/wordbooks/upload', requireAuth, upload.single('txt'), async (req,
     }
 });
 
-// 获取用户的词书列表
+// 获取用户的词书列表 (查询 user_wordbooks)
 app.get('/api/wordbooks', requireAuth, (req, res) => {
-    const wordbooks = all(`
-        SELECT wb.*, 
-               (SELECT COUNT(*) FROM user_progress up 
-                JOIN words w ON up.word_id = w.id 
-                WHERE w.wordbook_id = wb.id AND up.user_id = ? AND up.known = 1) as learned_count
-        FROM wordbooks wb 
-        WHERE wb.user_id = ? 
-        ORDER BY wb.created_at DESC
-    `, [req.session.userId, req.session.userId]);
+    try {
+        // 联合查询：只查用户订阅/拥有的词书
+        // 显式选择 wb.id 确保 ID 正确
+        const wordbooks = all(`
+            SELECT wb.id, wb.name, wb.total_words, wb.is_public, wb.created_at, 
+                   uw.role, uw.joined_at, 
+                   (SELECT COUNT(*) FROM user_progress up 
+                    JOIN words w ON up.word_id = w.id 
+                    WHERE w.wordbook_id = wb.id AND up.user_id = ? AND up.known = 1) as learned_count
+            FROM wordbooks wb 
+            JOIN user_wordbooks uw ON wb.id = uw.wordbook_id
+            WHERE uw.user_id = ? 
+            ORDER BY uw.joined_at DESC
+        `, [req.session.userId, req.session.userId]);
 
-    res.json(wordbooks);
+        console.log(`用户 ${req.session.userId} 获取词书列表，共 ${wordbooks.length} 本`);
+        res.json(wordbooks);
+    } catch (error) {
+        console.error('获取词书列表失败:', error);
+        res.status(500).json({ error: '获取失败' });
+    }
 });
 
-// 获取当前词书信息
+// 获取当前词书信息 (鉴权变更)
 app.get('/api/wordbooks/:id', requireAuth, (req, res) => {
+    // 检查是否有权访问（在 user_wordbooks 中有记录）
     const wordbook = get(`
-        SELECT wb.*, 
+        SELECT wb.*, uw.role,
                (SELECT COUNT(*) FROM user_progress up 
                 JOIN words w ON up.word_id = w.id 
                 WHERE w.wordbook_id = wb.id AND up.user_id = ? AND up.known = 1) as learned_count
         FROM wordbooks wb 
-        WHERE wb.id = ? AND wb.user_id = ?
+        JOIN user_wordbooks uw ON wb.id = uw.wordbook_id
+        WHERE wb.id = ? AND uw.user_id = ?
     `, [req.session.userId, req.params.id, req.session.userId]);
 
     if (!wordbook) {
-        return res.status(404).json({ error: '词书不存在' });
+        return res.status(404).json({ error: '词书不存在或未添加' });
     }
     res.json(wordbook);
 });
@@ -188,9 +206,10 @@ app.get('/api/wordbooks/:id', requireAuth, (req, res) => {
 app.post('/api/wordbooks/:id/reset', requireAuth, (req, res) => {
     const wordbookId = req.params.id;
 
-    // 验证词书归属
-    const wordbook = get('SELECT id FROM wordbooks WHERE id = ? AND user_id = ?', [wordbookId, req.session.userId]);
-    if (!wordbook) {
+    // 验证词书归属/订阅
+    const rel = get('SELECT id FROM user_wordbooks WHERE wordbook_id = ? AND user_id = ?',
+        [wordbookId, req.session.userId]);
+    if (!rel) {
         return res.status(404).json({ error: '词书不存在' });
     }
 
@@ -216,42 +235,49 @@ app.post('/api/wordbooks/:id/reset', requireAuth, (req, res) => {
 app.get('/api/study/next', requireAuth, (req, res) => {
     const wordbookId = parseInt(req.query.wordbookId, 10);
 
-    console.log('===== 刷词请求 =====');
-    console.log('用户ID:', req.session.userId, '词书ID:', wordbookId);
+    // 1. 鉴权：检查是否订阅/拥有
+    const rel = get('SELECT id FROM user_wordbooks WHERE wordbook_id = ? AND user_id = ?',
+        [wordbookId, req.session.userId]);
+    if (!rel) {
+        return res.status(403).json({ error: '未订阅该词书' });
+    }
 
-    // 查询words表总数
-    const totalInTable = get('SELECT COUNT(*) as count FROM words', []);
-    console.log('words表总记录数:', totalInTable?.count);
+    // 2. 查询总词数
+    const totalWords = get('SELECT COUNT(*) as count FROM words WHERE wordbook_id = ?', [wordbookId]).count;
 
-    // 查询该词书的单词
-    const allWords = all('SELECT * FROM words WHERE wordbook_id = ? ORDER BY order_index', [wordbookId]);
-    console.log('该词书单词数:', allWords.length);
-
-    if (allWords.length === 0) {
-        console.log('词书为空，返回completed');
+    if (totalWords === 0) {
         return res.json({ completed: true });
     }
 
-    // 获取已交互的单词ID（无论认识还是不认识，只要交互过就不再作为新词出现）
+    // 3. 获取已学习的单词ID (user_progress 中 known=1 或 known=0 均视为已刷过，但通常我们只过滤 known=1 还是全部？)
+    // 逻辑：
+    // - known=1: 已掌握 -> 不再出现
+    // - known=0: 不认识 -> 存入 mistakes 表，这里不再作为"新词"出现 (除非是复习模式，但这是新词模式)
+    // 所以只要在 user_progress 里有记录，就不算新词
     const learnedWords = all('SELECT word_id FROM user_progress WHERE user_id = ?', [req.session.userId]);
     const learnedIdSet = new Set(learnedWords.map(r => r.word_id));
-    console.log('已交互单词数:', learnedIdSet.size);
 
-    // 找第一个未掌握的单词
+    // 4. 找第一个未学习的单词
+    // 性能优化：直接 SQL 排除 (当 user_progress 很大时，NOT IN 可能慢，但目前量级均可)
+    // const word = get(`
+    //    SELECT * FROM words 
+    //    WHERE wordbook_id = ? 
+    //      AND id NOT IN (SELECT word_id FROM user_progress WHERE user_id = ?)
+    //    ORDER BY order_index ASC LIMIT 1
+    // `, [wordbookId, req.session.userId]);
+    // 既然用了 Set，且 words 可能几千条，全查出来 filter 内存也够用，且顺序可控
+    const allWords = all('SELECT * FROM words WHERE wordbook_id = ? ORDER BY order_index', [wordbookId]);
     const word = allWords.find(w => !learnedIdSet.has(w.id));
 
     if (!word) {
-        console.log('所有单词已掌握');
         return res.json({ completed: true });
     }
-
-    console.log('下一个单词:', word.word);
 
     res.json({
         word,
         progress: {
             current: learnedIdSet.size + 1,
-            total: allWords.length
+            total: totalWords
         }
     });
 });
@@ -260,17 +286,19 @@ app.get('/api/study/next', requireAuth, (req, res) => {
 app.post('/api/study/known', requireAuth, (req, res) => {
     const { wordId } = req.body;
 
-    // 先检查是否存在
     const existing = get('SELECT id FROM user_progress WHERE user_id = ? AND word_id = ?',
         [req.session.userId, wordId]);
 
     if (existing) {
-        run('UPDATE user_progress SET known = 1, last_reviewed = datetime("now") WHERE user_id = ? AND word_id = ?',
+        run('UPDATE user_progress SET known = 1, last_reviewed = datetime("now", "localtime") WHERE user_id = ? AND word_id = ?',
             [req.session.userId, wordId]);
     } else {
-        run('INSERT INTO user_progress (user_id, word_id, known, last_reviewed) VALUES (?, ?, 1, datetime("now"))',
+        run('INSERT INTO user_progress (user_id, word_id, known, last_reviewed) VALUES (?, ?, 1, datetime("now", "localtime"))',
             [req.session.userId, wordId]);
     }
+
+    // 从错词本移除（如果之前不认识）
+    run('DELETE FROM mistakes WHERE user_id = ? AND word_id = ?', [req.session.userId, wordId]);
 
     res.json({ success: true });
 });
@@ -279,53 +307,34 @@ app.post('/api/study/known', requireAuth, (req, res) => {
 app.post('/api/study/unknown', requireAuth, (req, res) => {
     const { wordId } = req.body;
 
-    // 更新进度
     const existing = get('SELECT id FROM user_progress WHERE user_id = ? AND word_id = ?',
         [req.session.userId, wordId]);
 
     if (existing) {
-        run('UPDATE user_progress SET known = 0, last_reviewed = datetime("now") WHERE user_id = ? AND word_id = ?',
+        run('UPDATE user_progress SET known = 0, last_reviewed = datetime("now", "localtime") WHERE user_id = ? AND word_id = ?',
             [req.session.userId, wordId]);
     } else {
-        run('INSERT INTO user_progress (user_id, word_id, known, last_reviewed) VALUES (?, ?, 0, datetime("now"))',
+        run('INSERT INTO user_progress (user_id, word_id, known, last_reviewed) VALUES (?, ?, 0, datetime("now", "localtime"))',
             [req.session.userId, wordId]);
     }
 
-    // 加入错词本（忽略重复）
-    const existingMistake = get('SELECT id FROM mistakes WHERE user_id = ? AND word_id = ?',
+    // 加入错词本
+    run('INSERT OR IGNORE INTO mistakes (user_id, word_id) VALUES (?, ?)',
         [req.session.userId, wordId]);
-    if (!existingMistake) {
-        run('INSERT INTO mistakes (user_id, word_id) VALUES (?, ?)',
-            [req.session.userId, wordId]);
-    }
 
     res.json({ success: true });
 });
 
 // ==================== 错词本API ====================
 
-// 获取错词列表
-app.get('/api/mistakes', requireAuth, (req, res) => {
-    const mistakes = all(`
-        SELECT w.*, m.added_at 
-        FROM mistakes m 
-        JOIN words w ON m.word_id = w.id 
-        WHERE m.user_id = ? 
-        ORDER BY m.added_at DESC
-    `, [req.session.userId]);
-
-    res.json(mistakes);
-});
-
-// 获取错词数量
 app.get('/api/mistakes/count', requireAuth, (req, res) => {
-    const count = get('SELECT COUNT(*) as count FROM mistakes WHERE user_id = ?',
-        [req.session.userId]);
+    const count = get('SELECT COUNT(*) as count FROM mistakes WHERE user_id = ?', [req.session.userId]);
     res.json(count || { count: 0 });
 });
 
-// 刷错词 - 获取下一个错词
+// 刷错词 - 获取下一个
 app.get('/api/mistakes/next', requireAuth, (req, res) => {
+    // 按加入时间排序，最早的先复习
     const mistake = get(`
         SELECT w.*, m.id as mistake_id
         FROM mistakes m 
@@ -339,131 +348,69 @@ app.get('/api/mistakes/next', requireAuth, (req, res) => {
         return res.json({ completed: true });
     }
 
-    const count = get('SELECT COUNT(*) as count FROM mistakes WHERE user_id = ?',
-        [req.session.userId]);
-
+    const count = get('SELECT COUNT(*) as count FROM mistakes WHERE user_id = ?', [req.session.userId]);
     res.json({ word: mistake, remaining: count?.count || 0 });
 });
 
-// 刷错词 - 标记为认识（从错词本移除）
 app.post('/api/mistakes/known', requireAuth, (req, res) => {
     const { wordId } = req.body;
+    run('DELETE FROM mistakes WHERE user_id = ? AND word_id = ?', [req.session.userId, wordId]);
 
-    run('DELETE FROM mistakes WHERE user_id = ? AND word_id = ?',
-        [req.session.userId, wordId]);
-
-    // 同时标记为已掌握
-    const existing = get('SELECT id FROM user_progress WHERE user_id = ? AND word_id = ?',
-        [req.session.userId, wordId]);
-
+    // 更新 progress 为 known
+    const existing = get('SELECT id FROM user_progress WHERE user_id = ? AND word_id = ?', [req.session.userId, wordId]);
     if (existing) {
-        run('UPDATE user_progress SET known = 1, last_reviewed = datetime("now") WHERE user_id = ? AND word_id = ?',
-            [req.session.userId, wordId]);
-    } else {
-        run('INSERT INTO user_progress (user_id, word_id, known, last_reviewed) VALUES (?, ?, 1, datetime("now"))',
-            [req.session.userId, wordId]);
+        run('UPDATE user_progress SET known = 1, last_reviewed = datetime("now") WHERE id = ?', [existing.id]);
     }
 
     res.json({ success: true });
 });
 
-// 刷错词 - 跳过本轮（保留在错词本，但移到队列末尾）
 app.post('/api/mistakes/skip', requireAuth, (req, res) => {
     const { wordId } = req.body;
-
-    // 更新added_at为当前时间，使其排到末尾
+    // 更新时间，沉底
     run('UPDATE mistakes SET added_at = datetime("now") WHERE user_id = ? AND word_id = ?',
         [req.session.userId, wordId]);
-
     res.json({ success: true });
 });
 
 // ==================== 统计API ====================
-
-// 获取学习统计
 app.get('/api/stats', requireAuth, (req, res) => {
-    const learned = get('SELECT COUNT(*) as count FROM user_progress WHERE user_id = ? AND known = 1',
-        [req.session.userId]);
-    const mistakes = get('SELECT COUNT(*) as count FROM mistakes WHERE user_id = ?',
-        [req.session.userId]);
-
+    const learned = get('SELECT COUNT(*) as count FROM user_progress WHERE user_id = ? AND known = 1', [req.session.userId]);
+    const mistakes = get('SELECT COUNT(*) as count FROM mistakes WHERE user_id = ?', [req.session.userId]);
     res.json({
         total_learned: learned?.count || 0,
         total_mistakes: mistakes?.count || 0
     });
 });
 
-// ==================== 词书市场 & 管理API ====================
-
-// 市场：获取公开词书列表
-app.get('/api/market', requireAuth, (req, res) => {
-    const wordbooks = all(`
-        SELECT wb.*, u.username as creator_name 
-        FROM wordbooks wb
-        JOIN users u ON wb.user_id = u.id
-        WHERE wb.is_public = 1
-        ORDER BY wb.created_at DESC
-    `);
-    res.json(wordbooks);
-});
-
-// 市场：克隆词书
+// 市场：克隆词书 -> 改为 [订阅词书]
 app.post('/api/market/clone', requireAuth, (req, res) => {
     const { wordbookId } = req.body;
 
     try {
-        // 1. 获取源词书信息
-        const sourceBook = get('SELECT * FROM wordbooks WHERE id = ? AND is_public = 1', [wordbookId]);
+        // 1. 检查是否已经订阅/拥有
+        const existing = get('SELECT id FROM user_wordbooks WHERE user_id = ? AND wordbook_id = ?',
+            [req.session.userId, wordbookId]);
+
+        if (existing) {
+            return res.status(400).json({ error: '您已经添加过该词书了' });
+        }
+
+        // 2. 验证源词书存在且公开
+        const sourceBook = get('SELECT id FROM wordbooks WHERE id = ? AND is_public = 1', [wordbookId]);
         if (!sourceBook) {
             return res.status(404).json({ error: '词书不存在或未公开' });
         }
 
-        // 2. 检查是否已经是自己的词书（这里允许克隆自己的，或者加上判定）
-        // 这里设计为：即便是自己的公开词书，也可以克隆一份副本
+        // 3. [Stage 2] 建立订阅关系 (不在复制单词!)
+        run('INSERT INTO user_wordbooks (user_id, wordbook_id, role) VALUES (?, ?, ?)',
+            [req.session.userId, wordbookId, 'subscriber']);
 
-        // 3. 创建新词书
-        const newName = `${sourceBook.name} (Copy)`;
-        const insertRes = run('INSERT INTO wordbooks (user_id, name, total_words, is_cloned) VALUES (?, ?, ?, 1)',
-            [req.session.userId, newName, sourceBook.total_words]);
-        const newBookId = insertRes.lastInsertRowid;
-
-        // 4. 获取源单词并批量插入
-        const words = all('SELECT word, order_index FROM words WHERE wordbook_id = ?', [wordbookId]);
-
-        // 批量插入单词
-        const placeholder = words.map(() => '(?, ?, ?, ?)').join(',');
-        const params = [];
-        words.forEach(w => {
-            params.push(newBookId, w.word, w.order_index);
-        });
-
-        // 这里简单处理，如果单词量很大可能需要分批。但目前 limits 是 50 in batchInsert，这里我们手动处理一下
-        // 重用 database.js 的 batchInsert 逻辑比较好，但 batchInsert 接收的是对象数组。
-        // 这里我们直接用 batchInsert 函数
-
-        // 构造 batchInsert 需要的格式
-        const wordsForInsert = words.map(w => ({ word: w.word })); // order_index 会自动生成? 不，这里我们要保持顺序
-        // 实际上 database.js 的 batchInsert 会自动处理 order_index。
-        // 为了保持原顺序，可能需要修改 batchInsert 或者在这里手动插入。
-        // 考虑到 batchInsert 是为了上传文件设计的，这里从数据库复制，手动拼 SQL 更快。
-
-        // 分批插入防止 SQL 过长
-        const BATCH_SIZE = 50;
-        for (let i = 0; i < words.length; i += BATCH_SIZE) {
-            const batch = words.slice(i, i + BATCH_SIZE);
-            const placeholders = batch.map(() => '(?, ?, ?)').join(',');
-            const batchParams = [];
-            batch.forEach(w => {
-                batchParams.push(newBookId, w.word, w.order_index);
-            });
-            run(`INSERT INTO words (wordbook_id, word, order_index) VALUES ${placeholders}`, batchParams);
-        }
-
-        res.json({ success: true, message: '获取成功', newBookId });
+        res.json({ success: true, message: '已添加到我的词书', newBookId: wordbookId });
 
     } catch (error) {
-        console.error('克隆词书失败:', error);
-        res.status(500).json({ error: '获取失败' });
+        console.error('订阅词书失败:', error);
+        res.status(500).json({ error: '添加失败' });
     }
 });
 
@@ -489,43 +436,124 @@ app.post('/api/admin/toggle-public', requireAdmin, (req, res) => {
 // 词典API
 
 // 有道词典查词（中文释义）
-app.get('/api/dict/:word', async (req, res) => {
-    const word = req.params.word;
+// 辅助函数：下载音频
+async function downloadAudio(word, url) {
+    if (!url) return null;
 
     try {
-        // 使用有道词典的查词接口
-        const url = `https://dict.youdao.com/suggest?num=1&ver=3.0&doctype=json&cache=false&le=en&q=${encodeURIComponent(word)}`;
+        const audioDir = path.join(__dirname, 'public', 'audio');
+        if (!fs.existsSync(audioDir)) {
+            fs.mkdirSync(audioDir, { recursive: true });
+        }
 
-        const response = await fetch(url);
-        const data = await response.json();
+        const fileName = `${word}.mp3`;
+        const filePath = path.join(audioDir, fileName);
 
-        // 尝试获取更详细的释义
+        // 如果文件已存在，直接返回相对路径
+        if (fs.existsSync(filePath)) {
+            return `/audio/${fileName}`;
+        }
+
+        const response = await fetch(url, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+        });
+        if (!response.ok) {
+            console.error(`下载失败: ${url}, status: ${response.status}`);
+            return null;
+        }
+
+        const buffer = await response.arrayBuffer();
+        fs.writeFileSync(filePath, Buffer.from(buffer));
+
+        return `/audio/${fileName}`;
+    } catch (error) {
+        console.error('音频下载失败:', error);
+        return null;
+    }
+}
+
+// 词典查询（优先查本地缓存 -> 有道API + 音频下载）
+app.get('/api/dict/:word', async (req, res) => {
+    const word = req.params.word.toLowerCase(); // 统一小写
+
+    try {
+        // 1. 查本地缓存
+        const cached = get('SELECT * FROM dictionary WHERE word = ?', [word]);
+
+        // 检查音频文件是否物理存在（有时缓存有记录但文件被删）
+        let audioValid = false;
+        if (cached && cached.audio_path) {
+            const absPath = path.join(__dirname, 'public', cached.audio_path);
+            if (fs.existsSync(absPath)) {
+                audioValid = true;
+            }
+        }
+
+        if (cached && audioValid) {
+            console.log(`词典缓存命中: ${word}`);
+            return res.json({
+                word: cached.word,
+                phonetic: cached.phonetic,
+                translation: JSON.parse(cached.translation),
+                audio: cached.audio_path
+            });
+        }
+
+        // 2. 调用有道 API
+        console.log(`词典缓存未命中，调用API: ${word}`);
+
+        // 简明释义 + 详细释义
+        const suggestUrl = `https://dict.youdao.com/suggest?num=1&ver=3.0&doctype=json&cache=false&le=en&q=${encodeURIComponent(word)}`;
         const dictUrl = `https://dict.youdao.com/jsonapi?q=${encodeURIComponent(word)}`;
-        const dictRes = await fetch(dictUrl);
-        const dictData = await dictRes.json();
+
+        const [suggestRes, dictRes] = await Promise.all([
+            fetch(suggestUrl).then(r => r.json()),
+            fetch(dictUrl).then(r => r.json())
+        ]);
 
         let phonetic = '';
         let translation = [];
+        let audioUrl = '';
 
-        // 获取音标
-        if (dictData.ec?.word?.[0]?.usphone) {
-            phonetic = `/${dictData.ec.word[0].usphone}/`;
+        // 解析音标
+        if (dictRes.ec?.word?.[0]?.usphone) {
+            phonetic = `/${dictRes.ec.word[0].usphone}/`;
+        } else if (dictRes.simple?.word?.[0]?.phone) {
+            phonetic = `/${dictRes.simple.word[0].phone}/`;
         }
 
-        // 获取中文释义
-        if (dictData.ec?.word?.[0]?.trs) {
-            translation = dictData.ec.word[0].trs.map(t => t.tr?.[0]?.l?.i?.[0] || '').filter(t => t);
+        // 解析释义
+        if (dictRes.ec?.word?.[0]?.trs) {
+            translation = dictRes.ec.word[0].trs.map(t => t.tr?.[0]?.l?.i?.[0] || '').filter(t => t);
+        }
+        if (translation.length === 0 && dictRes.fanyi?.tran) {
+            translation = [dictRes.fanyi.tran];
         }
 
-        // 如果没有找到释义，尝试使用简单翻译
-        if (translation.length === 0 && dictData.fanyi?.tran) {
-            translation = [dictData.fanyi.tran];
-        }
+        // 解析发音 URL (优先美音 type=2)
+        // 有道 API 通常不直接返回 mp3 url，而是通过 dictvoice 接口
+        // 我们直接构建官方发音链接
+        audioUrl = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(word)}&type=2`;
+
+        // 3. 下载音频到本地
+        const localAudioPath = await downloadAudio(word, audioUrl);
+
+        // 4. 存入数据库
+        // 如果已存在（可能是音频丢失导致没命中），则更新；否则插入
+        // 为简单起见，使用 REPLACE INTO 或者先删后插
+        run('DELETE FROM dictionary WHERE word = ?', [word]);
+
+        run(`INSERT INTO dictionary (word, phonetic, translation, audio_path, updated_at) 
+             VALUES (?, ?, ?, ?, datetime('now'))`,
+            [word, phonetic, JSON.stringify(translation), localAudioPath]);
 
         res.json({
             word: word,
             phonetic: phonetic,
-            translation: translation
+            translation: translation,
+            audio: localAudioPath
         });
 
     } catch (error) {

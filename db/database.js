@@ -103,10 +103,42 @@ async function initDatabase() {
         db.run('CREATE INDEX IF NOT EXISTS idx_words_wordbook ON words(wordbook_id)');
         db.run('CREATE INDEX IF NOT EXISTS idx_progress_user ON user_progress(user_id)');
         db.run('CREATE INDEX IF NOT EXISTS idx_mistakes_user ON mistakes(user_id)');
-        db.run('CREATE INDEX IF NOT EXISTS idx_mistakes_user ON mistakes(user_id)');
     } catch (e) {
         // 索引可能已存在
     }
+
+    // 创建词典缓存表 (重建以确保字段最新)
+    db.run('DROP TABLE IF EXISTS dictionary');
+    db.run(`
+        CREATE TABLE dictionary (
+            word TEXT PRIMARY KEY,
+            phonetic TEXT,
+            translation TEXT,
+            audio_path TEXT,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    // [Stage 2] 创建用户-词书关联表 (订阅模式)
+    db.run(`
+        CREATE TABLE IF NOT EXISTS user_wordbooks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            wordbook_id INTEGER NOT NULL,
+            role TEXT DEFAULT 'subscriber', -- 'owner' or 'subscriber'
+            joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (wordbook_id) REFERENCES wordbooks(id) ON DELETE CASCADE,
+            UNIQUE(user_id, wordbook_id)
+        )
+    `);
+
+    // 数据迁移：为现有词书确保 owner 记录
+    db.run(`
+        INSERT OR IGNORE INTO user_wordbooks (user_id, wordbook_id, role, joined_at)
+        SELECT user_id, id, 'owner', created_at
+        FROM wordbooks
+    `);
 
     await createAdminUser();
 
@@ -118,10 +150,14 @@ async function initDatabase() {
 
 // 保存数据库到文件
 function saveDatabase() {
-    if (db) {
-        const data = db.export();
-        const buffer = Buffer.from(data);
-        fs.writeFileSync(dbPath, buffer);
+    try {
+        if (db) {
+            const data = db.export();
+            const buffer = Buffer.from(data);
+            fs.writeFileSync(dbPath, buffer);
+        }
+    } catch (err) {
+        console.error('❌ 保存数据库失败:', err);
     }
 }
 

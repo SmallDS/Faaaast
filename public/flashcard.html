@@ -244,15 +244,6 @@
 
         let currentWord = null;
         let isShowingDetail = false;
-        let speechSynthesis = window.speechSynthesis;
-        let voices = [];
-
-        // 获取美式英语声音
-        function loadVoices() {
-            voices = speechSynthesis.getVoices();
-        }
-        speechSynthesis.onvoiceschanged = loadVoices;
-        loadVoices();
 
         // 返回上一页
         function goBack() {
@@ -265,8 +256,9 @@
             }
         }
 
-        // 发音（使用有道词典音频 - 美式发音）
+        // 发音（优先使用服务端返回的本地缓存，否则使用有道在线）
         let audioPlayer = null;
+        let cachedAudioPath = null; // 存储服务端返回的本地音频路径
 
         function speakWord() {
             if (!currentWord) return;
@@ -277,25 +269,19 @@
                 audioPlayer = null;
             }
 
-            // 有道词典美式发音 type=2
-            const audioUrl = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(currentWord.word)}&type=2`;
+            let audioUrl;
+
+            if (cachedAudioPath) {
+                audioUrl = cachedAudioPath;
+            } else {
+                // 尚未加载详情或无缓存，尝试直接构建在线链接（降级）
+                audioUrl = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(currentWord.word)}&type=2`;
+            }
 
             audioPlayer = new Audio(audioUrl);
             audioPlayer.play().catch(err => {
-                console.log('有道发音失败，使用本地TTS:', err);
-                // 降级到本地TTS
-                fallbackSpeak();
+                console.log('播放失败', err);
             });
-        }
-
-        // 降级方案：本地TTS
-        function fallbackSpeak() {
-            if (!currentWord) return;
-            speechSynthesis.cancel();
-            const utterance = new SpeechSynthesisUtterance(currentWord.word);
-            utterance.lang = 'en-US';
-            utterance.rate = 0.9;
-            speechSynthesis.speak(utterance);
         }
 
         // 加载下一个单词
@@ -313,6 +299,7 @@
 
                 currentWord = data.word;
                 isShowingDetail = false;
+                cachedAudioPath = null; // 重置音频缓存
 
                 // 更新进度
                 if (mode === 'mistakes') {
@@ -332,11 +319,36 @@
                 // 显示正确的按钮
                 showQuizButtons();
 
-                // 自动发音
-                setTimeout(speakWord, 300);
+                // 【重要】立即在后台预加载词典数据（包括音频下载）
+                // 这样当用户点击发音时，很可能已经缓存好了
+                preLoadDictionary(currentWord.word);
 
             } catch (error) {
                 console.error('加载单词失败:', error);
+            }
+        }
+
+        // 预加载词典（不显示，只为缓存音频）
+        async function preLoadDictionary(word) {
+            try {
+                const res = await fetch(`/api/dict/${encodeURIComponent(word)}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.audio) {
+                        cachedAudioPath = data.audio;
+                        // 这里可以自动播放，或者等待用户点击
+                        // 现在的逻辑是 300ms 后自动播放
+                        setTimeout(speakWord, 300);
+                    } else {
+                        // 如果后端没返回audio，手动触发一次旧逻辑播放
+                        setTimeout(speakWord, 300);
+                    }
+                } else {
+                    setTimeout(speakWord, 300);
+                }
+            } catch (e) {
+                console.error('预加载失败', e);
+                setTimeout(speakWord, 300);
             }
         }
 

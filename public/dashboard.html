@@ -243,25 +243,41 @@
 
         // 加载词书
         async function loadWordbooks() {
-            const res = await fetch('/api/wordbooks');
-            const wordbooks = await res.json();
-            window.allWordbooks = wordbooks;
-
-            if (wordbooks.length > 0) {
-                // 如果没有当前选中的，默认选第一个
-                if (!currentWordbook) {
-                    currentWordbook = wordbooks[0];
-                } else {
-                    // 如果有选中的，更新数据
-                    const found = wordbooks.find(w => w.id === currentWordbook.id);
-                    if (found) currentWordbook = found;
+            try {
+                const res = await fetch('/api/wordbooks');
+                if (!res.ok) {
+                    throw new Error(`API returned status ${res.status}`);
                 }
+                const wordbooks = await res.json();
 
-                renderCurrentWordbook();
-            } else {
+                // Debug alert (只在调试时开启)
+                // alert(`调试信息: 获取到 ${wordbooks.length} 本词书`);
+
+                window.allWordbooks = wordbooks;
+
+                if (wordbooks.length > 0) {
+                    // 如果没有当前选中的，默认选第一个
+                    if (!currentWordbook) {
+                        currentWordbook = wordbooks[0];
+                    } else {
+                        // 如果有选中的，更新数据
+                        const found = wordbooks.find(w => w.id === currentWordbook.id);
+                        if (found) currentWordbook = found;
+                        else currentWordbook = wordbooks[0]; // Fallback if current missing
+                    }
+
+                    renderCurrentWordbook();
+                } else {
+                    document.getElementById('noWordbook').classList.remove('hidden');
+                    document.getElementById('hasWordbook').classList.add('hidden');
+                    document.getElementById('btnStudy').disabled = true;
+                }
+            } catch (error) {
+                console.error('Loader error:', error);
+                alert('加载词书失败: ' + error.message);
+                document.getElementById('noWordbook').innerHTML =
+                    `<div class="text-rose-400 p-4">哎呀，加载出错了：<br>${error.message}</div>`;
                 document.getElementById('noWordbook').classList.remove('hidden');
-                document.getElementById('hasWordbook').classList.add('hidden');
-                document.getElementById('btnStudy').disabled = true;
             }
         }
 
