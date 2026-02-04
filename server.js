@@ -530,6 +530,60 @@ app.post('/api/market/clone', requireAuth, (req, res) => {
     }
 });
 
+// 管理员：统计数据
+app.get('/api/admin/stats', requireAdmin, (req, res) => {
+    const userCount = get('SELECT COUNT(*) as count FROM users').count;
+    const wordbookCount = get('SELECT COUNT(*) as count FROM wordbooks').count;
+    const wordCount = get('SELECT COUNT(*) as count FROM words').count;
+    const progressCount = get('SELECT COUNT(*) as count FROM user_progress').count;
+
+    res.json({
+        userCount,
+        wordbookCount,
+        wordCount,
+        progressCount
+    });
+});
+
+// 管理员：获取用户列表
+app.get('/api/admin/users', requireAdmin, (req, res) => {
+    const users = all('SELECT id, username, role, created_at FROM users ORDER BY created_at DESC');
+    res.json(users);
+});
+
+// 管理员：重置用户密码
+app.post('/api/admin/users/:id/reset', requireAdmin, async (req, res) => {
+    try {
+        const userId = req.params.id;
+        const newPassword = 'password123'; // 默认重置密码
+        const hash = await bcrypt.hash(newPassword, 10);
+
+        run('UPDATE users SET password_hash = ? WHERE id = ?', [hash, userId]);
+        res.json({ success: true, message: `密码已重置为: ${newPassword}` });
+    } catch (e) {
+        res.status(500).json({ error: '重置失败' });
+    }
+});
+
+// 管理员：删除用户
+app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
+    const userId = req.params.id;
+    if (userId == req.session.userId) {
+        return res.status(400).json({ error: '不能删除自己' });
+    }
+
+    // 级联删除会处理相关数据，但为了保险可以手动清理，这里依赖外键级联
+    run('DELETE FROM users WHERE id = ?', [userId]);
+    res.json({ success: true });
+});
+
+// 管理员：删除词书 (物理删除)
+app.delete('/api/admin/wordbooks/:id', requireAdmin, (req, res) => {
+    const bookId = req.params.id;
+    run('DELETE FROM wordbooks WHERE id = ?', [bookId]);
+    res.json({ success: true });
+});
+
 // 管理员：获取所有词书（排除克隆的）
 app.get('/api/admin/wordbooks', requireAdmin, (req, res) => {
     const wordbooks = all(`
@@ -681,6 +735,10 @@ app.get('/api/dict/:word', async (req, res) => {
 // 页面路由
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.get('/admin', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
 app.get('/dashboard', (req, res) => {

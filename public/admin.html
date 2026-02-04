@@ -4,161 +4,53 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>管理后台 - 速刷单词</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        primary: '#6366f1',
-                        'primary-dark': '#4f46e5',
-                        'background-dark': '#0f172a',
-                        'surface-dark': '#1e293b',
-                        'card-dark': '#334155',
-                    }
-                }
-            }
-        }
-    </script>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-        }
-    </style>
+    <title>管理后台 - Flashcard</title>
+    <link rel="stylesheet" href="/css/index.css">
+    <link rel="stylesheet" href="/css/admin.css">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 </head>
 
-<body class="bg-background-dark text-slate-100 min-h-screen">
-    <!-- Header -->
-    <header
-        class="px-6 h-16 flex items-center justify-between border-b border-white/5 bg-background-dark/50 backdrop-blur-md sticky top-0 z-50">
-        <div class="flex items-center gap-3">
-            <button onclick="window.location.href='/dashboard'"
-                class="text-slate-400 hover:text-white transition-colors">
-                <span class="material-icons-round">arrow_back</span>
-            </button>
-            <h1 class="text-lg font-bold text-rose-500">管理后台</h1>
-        </div>
-    </header>
-
-    <main class="p-6 max-w-6xl mx-auto">
-        <div class="bg-surface-dark rounded-2xl overflow-hidden border border-white/5 shadow-xl">
-            <div class="p-6 border-b border-white/5 flex justify-between items-center">
-                <h2 class="text-xl font-bold">全站词书管理</h2>
-                <span class="text-sm text-slate-400">仅管理员可见</span>
+<body>
+    <div class="admin-container">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <div class="logo">
+                <h2>Admin</h2>
             </div>
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active" data-tab="dashboard">
+                    <span class="icon">📊</span> 概览
+                </a>
+                <a href="#" class="nav-item" data-tab="users">
+                    <span class="icon">👥</span> 用户管理
+                </a>
+                <a href="#" class="nav-item" data-tab="wordbooks">
+                    <span class="icon">📚</span> 词书管理
+                </a>
+                <a href="/" class="nav-item return-home">
+                    <span class="icon">🏠</span> 返回首页
+                </a>
+            </nav>
+        </aside>
 
-            <div class="overflow-x-auto">
-                <table class="w-full text-left border-collapse">
-                    <thead>
-                        <tr class="bg-black/20 text-slate-400 text-sm">
-                            <th class="p-4 font-medium">ID</th>
-                            <th class="p-4 font-medium">词书名称</th>
-                            <th class="p-4 font-medium">上传者</th>
-                            <th class="p-4 font-medium">单词数</th>
-                            <th class="p-4 font-medium">创建时间</th>
-                            <th class="p-4 font-medium text-center">公开状态</th>
-                        </tr>
-                    </thead>
-                    <tbody id="bookList" class="divide-y divide-white/5">
-                        <!-- 动态加载 -->
-                        <tr>
-                            <td colspan="6" class="p-8 text-center text-slate-500">加载中...</td>
-                        </tr>
-                    </tbody>
-                </table>
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <header class="header">
+                <h1 id="page-title">系统概览</h1>
+                <div class="user-info">
+                    <span id="admin-username">Admin</span>
+                    <button id="logout-btn" class="btn-text">退出</button>
+                </div>
+            </header>
+
+            <div id="content-area">
+                <!-- 动态内容 -->
+                <div class="loading">加载中...</div>
             </div>
-        </div>
-    </main>
+        </main>
+    </div>
 
-    <script>
-        // 检查管理员权限
-        async function checkAdmin() {
-            try {
-                const res = await fetch('/api/auth/me');
-                if (!res.ok) window.location.href = '/';
-
-                const user = await res.json();
-                if (user.role !== 'admin') {
-                    alert('需要管理员权限');
-                    window.location.href = '/dashboard';
-                } else {
-                    loadBooks();
-                }
-            } catch (e) {
-                window.location.href = '/';
-            }
-        }
-
-        // 加载词书列表
-        async function loadBooks() {
-            try {
-                const res = await fetch('/api/admin/wordbooks');
-                if (!res.ok) throw new Error(res.statusText);
-
-                const books = await res.json();
-                const tbody = document.getElementById('bookList');
-
-                if (books.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-500">暂无数据</td></tr>';
-                    return;
-                }
-
-                tbody.innerHTML = books.map(book => `
-                    <tr class="hover:bg-white/5 transition-colors">
-                        <td class="p-4 text-slate-500">#${book.id}</td>
-                        <td class="p-4 font-medium text-white">${book.name}</td>
-                        <td class="p-4 text-slate-300">
-                            <div class="flex items-center gap-2">
-                                <span class="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs font-bold">
-                                    ${book.creator_name[0].toUpperCase()}
-                                </span>
-                                ${book.creator_name}
-                            </div>
-                        </td>
-                        <td class="p-4 text-slate-400">${book.total_words}</td>
-                        <td class="p-4 text-slate-500 text-sm">${new Date(book.created_at).toLocaleDateString()}</td>
-                        <td class="p-4 text-center">
-                            <button onclick="togglePublic(${book.id}, ${book.is_public})"
-                                class="px-3 py-1.5 rounded-full text-xs font-bold transition-all ${book.is_public
-                        ? 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20'
-                        : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
-                    }">
-                                ${book.is_public ? '已公开' : '私有'}
-                            </button>
-                        </td>
-                    </tr>
-                `).join('');
-
-            } catch (error) {
-                console.error('加载失败:', error);
-                document.getElementById('bookList').innerHTML = '<tr><td colspan="6" class="p-8 text-center text-rose-500">加载失败</td></tr>';
-            }
-        }
-
-        // 切换公开状态
-        async function togglePublic(id, currentStatus) {
-            const newStatus = !currentStatus;
-            try {
-                const res = await fetch('/api/admin/toggle-public', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ wordbookId: id, isPublic: newStatus })
-                });
-
-                if (res.ok) {
-                    loadBooks(); // 重新加载
-                } else {
-                    alert('操作失败');
-                }
-            } catch (error) {
-                console.error('操作失败:', error);
-            }
-        }
-
-        checkAdmin();
-    </script>
+    <script src="/js/admin.js"></script>
 </body>
 
 </html>
