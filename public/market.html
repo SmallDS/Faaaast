@@ -77,7 +77,16 @@
                     return;
                 }
 
-                container.innerHTML = books.map(book => `
+                container.innerHTML = books.map(book => {
+                    const isAdded = book.has_added > 0;
+                    const btnClass = isAdded
+                        ? 'bg-slate-700/50 text-slate-500 cursor-not-allowed'
+                        : 'bg-primary/10 hover:bg-primary hover:text-white text-primary';
+                    const btnText = isAdded ? '已添加' : '获取词书';
+                    const btnIcon = isAdded ? 'check' : 'add_circle_outline';
+                    const btnAction = isAdded ? '' : `onclick="cloneBook(${book.id})"`;
+
+                    return `
                     <div class="bg-surface-dark rounded-2xl p-5 border border-white/5 hover:border-primary/30 transition-all flex flex-col">
                         <div class="flex items-start justify-between mb-4">
                             <div class="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400">
@@ -91,13 +100,13 @@
                         <h3 class="text-lg font-bold text-white mb-1 truncate">${book.name}</h3>
                         <p class="text-sm text-slate-400 mb-6">${book.total_words} 单词</p>
                         
-                        <button onclick="cloneBook(${book.id})" 
-                            class="mt-auto w-full py-2.5 bg-primary/10 hover:bg-primary hover:text-white text-primary rounded-xl font-medium transition-all flex items-center justify-center gap-2 group">
-                            <span class="material-icons-round text-sm group-hover:scale-110 transition-transform">add_circle_outline</span>
-                            获取词书
+                        <button ${btnAction}
+                            class="mt-auto w-full py-2.5 rounded-xl font-medium transition-all flex items-center justify-center gap-2 group ${btnClass}">
+                            <span class="material-icons-round text-sm ${!isAdded ? 'group-hover:scale-110' : ''} transition-transform">${btnIcon}</span>
+                            ${btnText}
                         </button>
                     </div>
-                `).join('');
+                `}).join('');
 
             } catch (error) {
                 console.error('加载失败:', error);
@@ -115,11 +124,13 @@
                     body: JSON.stringify({ wordbookId: id })
                 });
 
+                const data = await res.json();
+
                 if (res.ok) {
                     alert('获取成功！已添加到您的书架。');
                     window.location.href = '/dashboard';
                 } else {
-                    alert('获取失败，请重试');
+                    alert(data.error || '获取失败，请重试');
                 }
             } catch (error) {
                 console.error('获取失败:', error);

@@ -400,6 +400,25 @@ app.get('/api/stats', requireAuth, (req, res) => {
     });
 });
 
+// 市场：获取公开词书列表
+// 市场：获取公开词书列表
+app.get('/api/market', requireAuth, (req, res) => {
+    try {
+        const books = all(`
+            SELECT wb.id, wb.name, wb.total_words, wb.created_at, u.username as creator_name,
+                   (SELECT COUNT(*) FROM user_wordbooks uw WHERE uw.wordbook_id = wb.id AND uw.user_id = ?) as has_added
+            FROM wordbooks wb
+            JOIN users u ON wb.user_id = u.id
+            WHERE wb.is_public = 1 AND wb.is_cloned = 0
+            ORDER BY wb.created_at DESC
+        `, [req.session.userId]);
+        res.json(books);
+    } catch (error) {
+        console.error('获取市场词书失败:', error);
+        res.status(500).json({ error: '获取失败' });
+    }
+});
+
 // 市场：克隆词书 -> 改为 [订阅词书]
 app.post('/api/market/clone', requireAuth, (req, res) => {
     const { wordbookId } = req.body;
