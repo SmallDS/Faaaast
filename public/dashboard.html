@@ -87,8 +87,8 @@
             <!-- 有词书时 -->
             <div id="hasWordbook" class="hidden w-full">
                 <div class="flex flex-col items-center mb-6">
-                    <div
-                        class="w-28 h-40 bg-primary rounded-lg shadow-lg relative overflow-hidden flex flex-col items-center pt-4 mb-4">
+                    <div onclick="openPreview()"
+                        class="w-28 h-40 bg-primary rounded-lg shadow-lg relative overflow-hidden flex flex-col items-center pt-4 mb-4 cursor-pointer hover:brightness-110 active:scale-95 transition-all">
                         <span class="text-white font-bold text-sm tracking-wider relative z-10">VOCABULARY</span>
                         <div class="absolute inset-0 pt-10">
                             <div class="grid grid-cols-2 gap-0 h-full opacity-40">
@@ -389,13 +389,20 @@
 
         // 开始刷错词
         function startMistakes() {
-            window.location.href = '/flashcard?mode=mistakes';
+            window.location.href = '/mistake_review';
         }
 
         // 退出登录
         async function logout() {
             await fetch('/api/logout', { method: 'POST' });
             window.location.href = '/';
+        }
+
+        // 打开预览
+        function openPreview() {
+            if (currentWordbook) {
+                window.location.href = `/preview?id=${currentWordbook.id}&name=${encodeURIComponent(currentWordbook.name)}`;
+            }
         }
 
         // 上传词书

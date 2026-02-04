@@ -332,6 +332,23 @@ app.get('/api/mistakes/count', requireAuth, (req, res) => {
     res.json(count || { count: 0 });
 });
 
+// 获取错词列表
+app.get('/api/mistakes', requireAuth, (req, res) => {
+    try {
+        const mistakes = all(`
+            SELECT w.word, w.id as word_id, m.added_at 
+            FROM mistakes m 
+            JOIN words w ON m.word_id = w.id 
+            WHERE m.user_id = ? 
+            ORDER BY m.added_at DESC
+        `, [req.session.userId]);
+        res.json(mistakes);
+    } catch (e) {
+        console.error('获取错词列表失败', e);
+        res.status(500).json({ error: '获取失败' });
+    }
+});
+
 // 刷错词 - 获取下一个
 app.get('/api/mistakes/next', requireAuth, (req, res) => {
     // 按加入时间排序，最早的先复习
@@ -577,6 +594,32 @@ app.get('/flashcard', (req, res) => {
 
 app.get('/mistakes', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'mistakes.html'));
+});
+
+app.get('/mistake_review', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'mistake_flashcard.html'));
+});
+
+app.get('/preview', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'wordbook_preview.html'));
+});
+
+// 获取词书的单词列表（预览用）
+app.get('/api/wordbooks/:id/words', requireAuth, (req, res) => {
+    const wordbookId = req.params.id;
+    // 检查权限：公开的或者是自己的
+    const book = get('SELECT id, is_public, user_id FROM wordbooks WHERE id = ?', [wordbookId]);
+    if (!book) return res.status(404).json({ error: '词书不存在' });
+
+    // 如果是私有且不是自己的
+    if (!book.is_public && book.user_id !== req.session.userId) {
+        // 检查是否订阅了
+        const sub = get('SELECT id FROM user_wordbooks WHERE user_id = ? AND wordbook_id = ?', [req.session.userId, wordbookId]);
+        if (!sub) return res.status(403).json({ error: '无权查看' });
+    }
+
+    const words = all('SELECT word, id FROM words WHERE wordbook_id = ? ORDER BY order_index ASC', [wordbookId]);
+    res.json({ words });
 });
 
 // 初始化数据库并启动服务器

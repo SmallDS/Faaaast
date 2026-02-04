@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html class="dark" lang="zh-CN">
+
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport" />
+    <title>词书预览</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com" rel="preconnect" />
+    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        primary: "#f59e0b",
+                        "background-dark": "#1e212f",
+                        "card-dark": "#2d3248",
+                        "surface-dark": "#2d3446",
+                    },
+                    fontFamily: {
+                        display: ["Inter", "system-ui", "sans-serif"],
+                    },
+                },
+            },
+        };
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1e212f;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* Hide scrollbar for Chrome, Safari and Opera */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+
+        /* Hide scrollbar for IE, Edge and Firefox */
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            /* IE and Edge */
+            scrollbar-width: none;
+            /* Firefox */
+        }
+    </style>
+</head>
+
+<body class="bg-background-dark text-slate-100 h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="flex items-center justify-between px-4 py-4 z-10 bg-background-dark/95 backdrop-blur sticky top-0">
+        <button onclick="history.back()" class="p-2 -ml-2 text-slate-400 hover:text-white transition-colors">
+            <span class="material-icons-round text-2xl">chevron_left</span>
+        </button>
+        <h1 class="text-base font-semibold">词书预览</h1>
+        <div class="flex items-center gap-2">
+            <button onclick="toggleSearch()" class="p-2 text-slate-400 hover:text-white transition-colors">
+                <span class="material-icons-round text-xl">search</span>
+            </button>
+            <button onclick="toggleViewMode()" class="p-2 -mr-2 text-slate-400 hover:text-white transition-colors">
+                <span id="viewIcon" class="material-icons-round text-xl">visibility</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Search Bar (Conditional) -->
+    <div id="searchBar" class="hidden px-4 pb-4">
+        <div class="relative">
+            <span
+                class="absolute left-3 top-1/2 -translate-y-1/2 material-icons-round text-slate-500 text-lg">search</span>
+            <input type="text" id="searchInput" placeholder="搜索单词..." oninput="filterWords()"
+                class="w-full bg-surface-dark border-0 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white placeholder-slate-500 focus:ring-1 focus:ring-primary">
+        </div>
+    </div>
+
+    <!-- Info Bar -->
+    <div class="px-6 py-2 flex items-center gap-2">
+        <div class="w-1 h-3.5 bg-slate-500 rounded-full"></div>
+        <span id="totalCount" class="text-sm font-bold text-slate-300">Loading...</span>
+    </div>
+
+    <!-- Word List -->
+    <main class="flex-1 overflow-y-auto px-0 no-scrollbar pb-10">
+        <div id="wordList" class="divide-y divide-slate-800/50">
+            <!-- Dynamic Content -->
+        </div>
+
+        <!-- Empty State -->
+        <div id="emptyState" class="hidden py-20 text-center">
+            <span class="material-icons-round text-4xl text-slate-600 mb-2">content_paste_search</span>
+            <p class="text-slate-500 text-sm">暂无匹配单词</p>
+        </div>
+    </main>
+
+    <script>
+        // State
+        let allWords = [];
+        let isSimpleView = true;
+
+        // Init
+        document.addEventListener('DOMContentLoaded', () => {
+            const params = new URLSearchParams(window.location.search);
+            const bookId = params.get('id');
+            const bookName = params.get('name');
+
+            if (bookName) document.querySelector('h1').textContent = decodeURIComponent(bookName);
+
+            if (bookId) {
+                loadWords(bookId);
+            } else {
+                alert('缺少词书ID');
+                window.location.href = '/dashboard';
+            }
+        });
+
+        async function loadWords(bookId) {
+            try {
+                const res = await fetch(`/api/wordbooks/${bookId}/words`);
+                if (!res.ok) throw new Error('API Error');
+                const data = await res.json();
+
+                allWords = data.words;
+                document.getElementById('totalCount').textContent = `${allWords.length} 词`;
+
+                renderList(allWords);
+            } catch (error) {
+                console.error(error);
+                alert('加载单词失败');
+            }
+        }
+
+        function renderList(words) {
+            const container = document.getElementById('wordList');
+            const empty = document.getElementById('emptyState');
+
+            if (words.length === 0) {
+                container.innerHTML = '';
+                empty.classList.remove('hidden');
+                return;
+            }
+
+            empty.classList.add('hidden');
+
+            // Limit render for performance if list is huge (lazy load logic could be added here, but simple for now)
+            container.innerHTML = words.map(w => `
+                <div class="px-6 py-4 hover:bg-white/5 transition-colors cursor-pointer group" onclick="speakWord('${w.word.replace(/'/g, "\\'")}')">
+                    <div class="flex items-center justify-between">
+                        <span class="text-[17px] font-medium text-slate-200 tracking-wide group-hover:text-white transition-colors">
+                            ${w.word}
+                        </span>
+                        ${!isSimpleView ? `<span class="material-icons-round text-slate-600 text-sm">volume_up</span>` : ''}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function filterWords() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            const filtered = allWords.filter(w => w.word.toLowerCase().includes(query));
+
+            document.getElementById('totalCount').textContent = `${filtered.length} 词`;
+            renderList(filtered);
+        }
+
+        function toggleSearch() {
+            const bar = document.getElementById('searchBar');
+            const input = document.getElementById('searchInput');
+
+            if (bar.classList.contains('hidden')) {
+                bar.classList.remove('hidden');
+                input.focus();
+            } else {
+                bar.classList.add('hidden');
+                input.value = '';
+                filterWords(); // Reset
+            }
+        }
+
+        function toggleViewMode() {
+            isSimpleView = !isSimpleView;
+            const icon = document.getElementById('viewIcon');
+            icon.textContent = isSimpleView ? 'visibility' : 'visibility_off';
+            renderList(document.getElementById('searchInput').value ?
+                allWords.filter(w => w.word.toLowerCase().includes(document.getElementById('searchInput').value)) :
+                allWords);
+        }
+
+        function speakWord(word) {
+            const audio = new Audio(`https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(word)}&type=2`);
+            audio.play().catch(() => { });
+        }
+    </script>
+</body>
+
+</html>

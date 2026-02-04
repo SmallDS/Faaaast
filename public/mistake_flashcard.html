@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8" />
     <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport" />
-    <title>速刷单词 - 刷词</title>
+    <title>速刷单词 - 刷错词</title>
     <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet" />
     <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -153,16 +153,7 @@
                 </div>
             </div>
 
-            <!-- 提示信息 -->
-            <div id="mistakeTip" class="bg-surface-dark rounded-xl p-4 mb-4">
-                <div class="flex items-start gap-3">
-                    <span class="material-icons-round text-primary text-lg">lightbulb</span>
-                    <div>
-                        <p class="text-sm text-slate-300 mb-1">这个单词已加入错词本</p>
-                        <p class="text-xs text-slate-500">稍后可以在错词本中复习</p>
-                    </div>
-                </div>
-            </div>
+            <!-- 刷错词模式不需要“已加入错词本”提示 -->
         </div>
 
         <!-- 完成提示 -->
@@ -206,7 +197,7 @@
         </div>
     </main>
 
-    <!-- Footer Buttons - 刷新词模式 -->
+    <!-- Footer Buttons - 初始问答模式 -->
     <footer id="actionButtons"
         class="fixed bottom-0 left-0 right-0 p-4 pb-8 flex gap-4 bg-gradient-to-t from-background-dark via-background-dark to-transparent z-50">
         <button id="btnKnown" onclick="markKnown()"
@@ -231,7 +222,7 @@
         </button>
     </footer>
 
-    <!-- Footer Buttons - 认识详情模式（下一词 + 记错了） -->
+    <!-- Footer Buttons - 认识详情模式（下一词，记错了） -->
     <footer id="knownDetailButtons"
         class="hidden fixed bottom-0 left-0 right-0 p-4 pb-8 flex gap-4 bg-gradient-to-t from-background-dark via-background-dark to-transparent z-50">
         <button onclick="goToNextWord()"
@@ -246,30 +237,30 @@
         </button>
     </footer>
 
+
     <script>
-        const urlParams = new URLSearchParams(window.location.search);
-        const wordbookId = urlParams.get('wordbookId');
+        // 固定为错词模式
+        const mode = 'mistakes';
 
-        // 只剩下 Study 模式
-        const mode = 'study';
-
+        // 兼容原有的全局变量
         let currentWord = null;
         let isShowingDetail = false;
 
-        const BATCH_SIZE = 40;
+        // 分组学习配置
+        const BATCH_SIZE = 20;
         let sessionCount = 0;
         let currentBatchTarget = BATCH_SIZE;
 
         // 统计数据
         let sessionKnownCount = 0;
         let sessionUnknownCount = 0;
-        let totalRemaining = 0; // 总剩余词数
+        let remainingMistakes = 0;
 
         // 返回上一页
         function goBack() {
             if (sessionCount < currentBatchTarget && sessionCount > 0 && currentWord) {
                 const remaining = currentBatchTarget - sessionCount;
-                if (!confirm(`本组单词还剩 ${remaining} 个未刷完。\n\n现在退出下次将开启新一组单词学习，确定要退出吗？`)) {
+                if (!confirm(`本组错词还剩 ${remaining} 个未复习。\n\n现在退出下次将开启新一组，确定要退出吗？`)) {
                     return;
                 }
             }
@@ -307,25 +298,27 @@
             });
         }
 
-        // 加载下一个单词
+        // 加载下一个错词
         async function loadNextWord() {
-            if (!wordbookId) {
-                document.getElementById('wordText').textContent = '错误: 缺少词书ID';
-                document.getElementById('wordText').classList.add('text-rose-500', 'text-2xl');
-                return;
-            }
-
+            // 检查组任务
             if (sessionCount >= currentBatchTarget) {
                 showBatchCompleted();
                 return;
             }
 
-            // Always use study endpoint
-            const endpoint = `/api/study/next?wordbookId=${wordbookId}`;
+            const endpoint = '/api/mistakes/next';
 
             try {
                 const res = await fetch(endpoint);
-                if (!res.ok) throw new Error(`API Error: ${res.status}`);
+                if (!res.ok) {
+                    // 如果是401未登录，跳转登录
+                    if (res.status === 401) {
+                        alert('登录已过期，请重新登录');
+                        window.location.href = '/';
+                        return;
+                    }
+                    throw new Error(`API Error: ${res.status}`);
+                }
                 const data = await res.json();
 
                 if (data.completed) {
@@ -335,28 +328,29 @@
 
                 if (!data.word) throw new Error('未获取到单词数据');
 
-                currentWord = data.word;
-
-                // 计算剩余词数
-                if (data.progress) {
-                    // progress.current 是已学数量(包含当前?), total是总数
-                    // 剩余 = total - (current - 1) - 1 ?? 
-                    // 实际上 data.progress.current 已经是已学的个数 + 1 (当前这个)
-                    // 所以剩余 = total - (current - 1)
-                    totalRemaining = data.progress.total - (data.progress.current - 1);
-                    // 但这里 current 包含自己吗？ server.js: learnedIdSet.size + 1
-                    // 是的，current 是当前是第几个。
+                // 只有第一张卡才调整目标，避免中途变动
+                if (sessionCount === 0 && data.remaining !== undefined) {
+                    // data.remaining 是数据库里的 total count (api/mistakes/next)
+                    currentBatchTarget = Math.min(BATCH_SIZE, data.remaining);
+                    remainingMistakes = data.remaining; // 初始剩余
+                } else if (data.remaining !== undefined) {
+                    remainingMistakes = data.remaining;
                 }
 
+                currentWord = data.word;
                 isShowingDetail = false;
                 cachedAudioPath = null;
 
+                // 预加载详情和音频
                 preLoadDictionary(currentWord.word);
 
+                // 更新进度
                 document.getElementById('progress').textContent = `本组进度 ${sessionCount + 1}/${currentBatchTarget}`;
 
+                // 动画
                 const card = document.getElementById('wordCard');
                 card.classList.remove('slide-in', 'hidden');
+
                 document.getElementById('wordText').textContent = currentWord.word;
                 document.getElementById('wordText').classList.remove('text-base', 'text-rose-400');
 
@@ -364,12 +358,15 @@
                 card.classList.add('slide-in');
 
                 showQuizButtons();
+
+                // 自动发音
                 setTimeout(speakWord, 300);
 
             } catch (error) {
                 console.error('加载单词失败:', error);
                 document.getElementById('wordText').textContent = '加载失败: ' + error.message;
                 document.getElementById('wordText').classList.add('text-base', 'text-rose-400');
+                // 可选：alert('加载失败，请检查网络或重试');
             }
         }
 
@@ -383,18 +380,26 @@
             const completedCard = document.getElementById('completedCard');
             completedCard.classList.remove('hidden');
 
+            const title = completedCard.querySelector('h2');
+            if (title) title.textContent = '🎉 本组错词复习完成！';
+
             // 填充数据
-            document.getElementById('sessionKnown').textContent = sessionKnownCount;
-            document.getElementById('sessionUnknown').textContent = sessionUnknownCount;
-            document.getElementById('remainingText').textContent = `还剩 ${Math.max(0, totalRemaining - 1)} 词`;
-            // -1 因为 totalRemaining 是在 loadNextWord 更新的，刷完一组后，其实还要减去最后一个?
-            // 不, totalRemaining 是在拿出卡片时计算的 "Current remaining".
-            // 刷完后，剩下的应该是 totalRemaining - 1 (刚才那张)
+            if (document.getElementById('sessionKnown')) {
+                document.getElementById('sessionKnown').textContent = sessionKnownCount;
+                document.getElementById('sessionUnknown').textContent = sessionUnknownCount;
+            }
+            if (document.getElementById('remainingText')) {
+                document.getElementById('remainingText').textContent = `还剩 ${Math.max(0, remainingMistakes - 1)} 词`;
+            }
+
+            // 确保按钮显示正确
+            const continueBtn = completedCard.querySelector('button[onclick="continueNextBatch()"]');
+            if (continueBtn) continueBtn.classList.remove('hidden');
         }
 
         function continueNextBatch() {
             sessionCount = 0;
-            currentBatchTarget = BATCH_SIZE;
+            currentBatchTarget = BATCH_SIZE; // 这里其实会被 loadNextWord 的 remaining 覆盖，但先重置为默认
             sessionKnownCount = 0;
             sessionUnknownCount = 0;
 
@@ -402,7 +407,6 @@
             loadNextWord();
         }
 
-        // ... (preLoadDictionary, showQuizButtons, etc. unchanged) ...
         async function preLoadDictionary(word) {
             try {
                 const res = await fetch(`/api/dict/${encodeURIComponent(word)}`);
@@ -420,7 +424,6 @@
             document.getElementById('wordCard').classList.remove('hidden');
             document.getElementById('unknownDetailButtons').classList.add('hidden');
             document.getElementById('knownDetailButtons').classList.add('hidden');
-            // 只显示主按钮
             document.getElementById('actionButtons').classList.remove('hidden');
         }
 
@@ -440,12 +443,10 @@
 
             if (isKnown) {
                 document.getElementById('knownDetailButtons').classList.remove('hidden');
-                document.getElementById('mistakeTip').classList.add('hidden');
             } else {
                 document.getElementById('unknownDetailButtons').classList.remove('hidden');
-                // 不认识 -> 肯定是错词，显示提示
-                document.getElementById('mistakeTip').classList.remove('hidden');
             }
+            // 不需要显示 mistakeTip
 
             document.getElementById('phonetic').textContent = '';
             document.getElementById('definitionArea').innerHTML = '<div class="text-slate-400 text-sm">正在加载释义...</div>';
@@ -454,7 +455,15 @@
             await loadDictionary(currentWord.word);
         }
 
-        // ... (loadDictionary, showDictError logic unchanged) ...
+        function hideDetail() {
+            isShowingDetail = false;
+            isKnownMode = false;
+            document.getElementById('detailCard').classList.add('hidden');
+            document.getElementById('unknownDetailButtons').classList.add('hidden');
+            document.getElementById('knownDetailButtons').classList.add('hidden');
+            // 恢复主按钮可能不是必须的，因为通常只有 goToNextWord 会调用 hideDetail 并紧接着 loadNextWord
+        }
+
         async function loadDictionary(word) {
             try {
                 const res = await fetch(`/api/dict/${encodeURIComponent(word)}`);
@@ -463,8 +472,8 @@
                     speakWord();
                     return;
                 }
-
                 const data = await res.json();
+
                 document.getElementById('phonetic').textContent = data.phonetic || '';
 
                 if (data.translation && data.translation.length > 0) {
@@ -496,89 +505,115 @@
             `;
         }
 
-        function hideDetail() {
-            isShowingDetail = false;
-            isKnownMode = false;
-            document.getElementById('detailCard').classList.add('hidden');
-            document.getElementById('unknownDetailButtons').classList.add('hidden');
-            document.getElementById('knownDetailButtons').classList.add('hidden');
-        }
-
+        // 标记为认识 (移出错词本)
         async function markKnown() {
             if (!currentWord) return;
-            sessionKnownCount++; // 增加认识计数
+            sessionKnownCount++;
 
-            await fetch('/api/study/known', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ wordId: currentWord.id })
-            });
-            showDetail(true);
+            try {
+                const res = await fetch('/api/mistakes/known', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ wordId: currentWord.id })
+                });
+
+                if (!res.ok) throw new Error('操作失败');
+
+                showDetail(true);
+            } catch (e) {
+                alert('网络错误，无法标记为认识');
+            }
         }
 
+        // 标记为不认识 (保持在错词本)
         async function markUnknown() {
             if (!currentWord) return;
-            sessionUnknownCount++; // 增加不认识计数
-
-            await fetch('/api/study/unknown', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ wordId: currentWord.id })
-            });
+            sessionUnknownCount++;
+            // 已经是错词模式，不需要额外调用API添加，只需要展示详情
             showDetail(false);
         }
 
+        // 记错了 (原本以为认识，实际不认识 -> 重新确保它在错词本)
         async function markAsMistake() {
             if (!currentWord) return;
-            // 修正计数：从认识 -> 不认识
             sessionKnownCount--;
             sessionUnknownCount++;
 
-            await fetch('/api/study/unknown', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ wordId: currentWord.id })
-            });
-            goToNextWord();
+            try {
+                // 重新加入错词本
+                await fetch('/api/study/unknown', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ wordId: currentWord.id })
+                });
+
+                goToNextWord();
+            } catch (e) {
+                alert('加入错词本失败');
+            }
         }
 
         async function goToNextWord() {
             sessionCount++;
+
             const card = document.getElementById('detailCard');
             card.classList.add('slide-out-left');
 
+            // 如果是不认识模式，表示没学会，需要跳过(下沉)
+            if (!isKnownMode) {
+                try {
+                    await fetch('/api/mistakes/skip', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ wordId: currentWord.id })
+                    });
+                } catch (e) {
+                    console.error('Skip failed', e);
+                    // 失败也不影响流程，继续下一词
+                }
+            }
+
             setTimeout(() => {
                 card.classList.remove('slide-out-left');
+                // 隐藏详情
                 hideDetail();
+
                 loadNextWord();
             }, 300);
         }
 
         function showCompleted() {
-            // 所有都完成了
             document.getElementById('wordCard').classList.add('hidden');
             document.getElementById('detailCard').classList.add('hidden');
+            document.getElementById('actionButtons').classList.add('hidden');
+            document.getElementById('unknownDetailButtons').classList.add('hidden');
+            document.getElementById('knownDetailButtons').classList.add('hidden');
 
-            // 复用 batch completed UI, 只是文案不同?
-            // To be simple, just show batch completed UI but hide continue button?
-            // But usually we just say "All Done"
+            // Show batch completed UI but with All Done message
             showBatchCompleted();
-            document.querySelector('#completedCard h2').textContent = '🎉 所有单词已学完！';
-            document.querySelector('button[onclick="continueNextBatch()"]').classList.add('hidden');
+            document.querySelector('#completedCard h2').textContent = '🎉 错词本已清空！';
+
+            // 隐藏 "继续刷" 按钮，因为没词了
+            const continueBtn = document.querySelector('button[onclick="continueNextBatch()"]');
+            if (continueBtn) continueBtn.classList.add('hidden');
         }
 
-        // ... (checkAuth, init etc) ...
+        // 检查登录状态
         async function checkAuth() {
-            const res = await fetch('/api/check-auth');
-            const data = await res.json();
-            if (!data.authenticated) {
-                window.location.href = '/';
+            try {
+                const res = await fetch('/api/check-auth');
+                const data = await res.json();
+                if (!data.authenticated) {
+                    window.location.href = '/';
+                }
+            } catch (e) {
+                console.error('Auth check failed', e);
             }
         }
 
         function toggleFullscreen() {
             if (!document.fullscreenElement) {
-                document.documentElement.requestFullscreen().catch(err => console.log(err));
+                document.documentElement.requestFullscreen().catch(e => console.log(e));
                 document.getElementById('fullscreenIcon').textContent = 'fullscreen_exit';
             } else {
                 document.exitFullscreen();
@@ -595,7 +630,12 @@
             }
         });
 
-        checkAuth().then(() => loadNextWord());
+        // 初始化
+        checkAuth().then(() => {
+            console.log('App Initialized, Loading First Word...');
+            loadNextWord();
+        });
+
     </script>
 </body>
 
