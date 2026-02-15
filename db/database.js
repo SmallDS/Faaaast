@@ -18,6 +18,9 @@ async function initDatabase() {
         db = new SQL.Database();
     }
 
+    // 启用外键约束（sql.js 默认不启用）
+    db.run('PRAGMA foreign_keys = ON');
+
     // 创建表结构
     db.run(`
         CREATE TABLE IF NOT EXISTS users (
@@ -59,6 +62,13 @@ async function initDatabase() {
     // 检查并添加 is_cloned 列
     try {
         db.run("ALTER TABLE wordbooks ADD COLUMN is_cloned INTEGER DEFAULT 0");
+    } catch (e) {
+        // 列已存在
+    }
+
+    // 检查并添加 content_hash 列 (用于去重)
+    try {
+        db.run("ALTER TABLE wordbooks ADD COLUMN content_hash TEXT");
     } catch (e) {
         // 列已存在
     }
@@ -107,10 +117,9 @@ async function initDatabase() {
         // 索引可能已存在
     }
 
-    // 创建词典缓存表 (重建以确保字段最新)
-    db.run('DROP TABLE IF EXISTS dictionary');
+    // 创建词典缓存表（使用 IF NOT EXISTS 保留缓存数据）
     db.run(`
-        CREATE TABLE dictionary (
+        CREATE TABLE IF NOT EXISTS dictionary (
             word TEXT PRIMARY KEY,
             phonetic TEXT,
             translation TEXT,
@@ -256,6 +265,7 @@ module.exports = {
     get,
     all,
     run,
+    runNoSave,
     batchInsert,
     saveDatabase
 };

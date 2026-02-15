@@ -116,7 +116,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     function displayUsers(users) {
         let html = `
             <div class="search-bar">
-                <input type="text" id="userCearchInput" class="search-input" placeholder="搜索用户名..." oninput="filterUsers(this.value)">
+                <input type="text" id="userSearchInput" class="search-input" placeholder="搜索用户名..." oninput="filterUsers(this.value)">
             </div>
             <div class="table-container">
                 <table class="admin-table">

@@ -3,8 +3,9 @@ const session = require('express-session');
 const path = require('path');
 const multer = require('multer');
 const fs = require('fs');
-const { initDatabase, get, all, run, batchInsert } = require('./db/database');
+const { initDatabase, get, all, run, runNoSave, batchInsert, saveDatabase } = require('./db/database');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -152,7 +153,6 @@ app.get('/api/check-auth', (req, res) => {
 // ==================== 词书API ====================
 
 // 上传TXT词书
-// 上传TXT词书
 app.post('/api/wordbooks/upload', requireAuth, upload.single('txt'), async (req, res) => {
     try {
         if (!req.file) {
@@ -173,9 +173,39 @@ app.post('/api/wordbooks/upload', requireAuth, upload.single('txt'), async (req,
             return res.status(400).json({ error: 'TXT文件中未找到有效单词' });
         }
 
+        // 1. 计算内容哈希
+        const contentHash = crypto.createHash('md5').update(textContent).digest('hex');
+
+        // 2. 检查该用户是否已拥有相同内容的词书
+        const existingBook = get(
+            'SELECT id FROM wordbooks WHERE user_id = ? AND content_hash = ?',
+            [req.session.userId, contentHash]
+        );
+
+        if (existingBook) {
+            // 如果已存在，直接返回由于已存在，无需重复创建
+            // 还需要检查 user_wordbooks 关联吗？（如果它是 owner，肯定有关联）
+            // 但如果之前有bug导致有关联丢失，这里可以补救。
+            // 简单起见，确保关联
+            const link = get('SELECT id FROM user_wordbooks WHERE user_id = ? AND wordbook_id = ?',
+                [req.session.userId, existingBook.id]);
+
+            if (!link) {
+                run('INSERT INTO user_wordbooks (user_id, wordbook_id, role) VALUES (?, ?, ?)',
+                    [req.session.userId, existingBook.id, 'owner']);
+            }
+
+            return res.json({
+                success: true,
+                wordbookId: existingBook.id,
+                wordCount: words.length,
+                message: '检测到内容重复，已为您打开现有词书'
+            });
+        }
+
         // 创建词书 (user_id 仍作为 创建者 记录，但权限看 user_wordbooks)
-        const result = run('INSERT INTO wordbooks (user_id, name, total_words) VALUES (?, ?, ?)',
-            [req.session.userId, bookName, words.length]);
+        const result = run('INSERT INTO wordbooks (user_id, name, total_words, content_hash) VALUES (?, ?, ?, ?)',
+            [req.session.userId, bookName, words.length, contentHash]);
         const wordbookId = result.lastInsertRowid;
 
         // [Stage 2] 添加所有者关联
@@ -295,13 +325,26 @@ app.delete('/api/wordbooks/:id', requireAuth, (req, res) => {
 
     try {
         if (rel.role === 'owner') {
-            // 是所有者，物理删除词书 (级联会删除 words, progress 等)
+            // 是所有者，物理删除词书及所有关联数据
+            const wordIds = all('SELECT id FROM words WHERE wordbook_id = ?', [wordbookId]).map(w => w.id);
+            if (wordIds.length > 0) {
+                // 分批清理关联的 user_progress 和 mistakes
+                const placeholders = wordIds.map(() => '?').join(',');
+                run(`DELETE FROM user_progress WHERE word_id IN (${placeholders})`, wordIds);
+                run(`DELETE FROM mistakes WHERE word_id IN (${placeholders})`, wordIds);
+            }
+            run('DELETE FROM words WHERE wordbook_id = ?', [wordbookId]);
+            run('DELETE FROM user_wordbooks WHERE wordbook_id = ?', [wordbookId]);
             run('DELETE FROM wordbooks WHERE id = ?', [wordbookId]);
             res.json({ success: true, message: '词书已永久删除' });
         } else {
-            // 是订阅者，仅删除关联
+            // 是订阅者，删除关联 + 清理该用户对该词书的进度
             run('DELETE FROM user_wordbooks WHERE wordbook_id = ? AND user_id = ?',
                 [wordbookId, req.session.userId]);
+            run(`DELETE FROM user_progress WHERE user_id = ? AND word_id IN (SELECT id FROM words WHERE wordbook_id = ?)`,
+                [req.session.userId, wordbookId]);
+            run(`DELETE FROM mistakes WHERE user_id = ? AND word_id IN (SELECT id FROM words WHERE wordbook_id = ?)`,
+                [req.session.userId, wordbookId]);
             res.json({ success: true, message: '已取消关注该词书' });
         }
     } catch (e) {
@@ -329,23 +372,17 @@ app.get('/api/study/next', requireAuth, (req, res) => {
         return res.json({ completed: true });
     }
 
-    // 3. 获取已学习的单词ID (user_progress 中 known=1 或 known=0 均视为已刷过，但通常我们只过滤 known=1 还是全部？)
-    // 逻辑：
-    // - known=1: 已掌握 -> 不再出现
-    // - known=0: 不认识 -> 存入 mistakes 表，这里不再作为"新词"出现 (除非是复习模式，但这是新词模式)
-    // 所以只要在 user_progress 里有记录，就不算新词
-    const learnedWords = all('SELECT word_id FROM user_progress WHERE user_id = ?', [req.session.userId]);
+    // 3. 获取当前词书中已学习的单词ID
+    // 只要在 user_progress 里有记录（known=1 或 known=0），就不算新词
+    const learnedWords = all(
+        `SELECT up.word_id FROM user_progress up
+         JOIN words w ON up.word_id = w.id
+         WHERE up.user_id = ? AND w.wordbook_id = ?`,
+        [req.session.userId, wordbookId]
+    );
     const learnedIdSet = new Set(learnedWords.map(r => r.word_id));
 
     // 4. 找第一个未学习的单词
-    // 性能优化：直接 SQL 排除 (当 user_progress 很大时，NOT IN 可能慢，但目前量级均可)
-    // const word = get(`
-    //    SELECT * FROM words 
-    //    WHERE wordbook_id = ? 
-    //      AND id NOT IN (SELECT word_id FROM user_progress WHERE user_id = ?)
-    //    ORDER BY order_index ASC LIMIT 1
-    // `, [wordbookId, req.session.userId]);
-    // 既然用了 Set，且 words 可能几千条，全查出来 filter 内存也够用，且顺序可控
     const allWords = all('SELECT * FROM words WHERE wordbook_id = ? ORDER BY order_index', [wordbookId]);
     const word = allWords.find(w => !learnedIdSet.has(w.id));
 
@@ -481,7 +518,6 @@ app.get('/api/stats', requireAuth, (req, res) => {
 });
 
 // 市场：获取公开词书列表
-// 市场：获取公开词书列表
 app.get('/api/market', requireAuth, (req, res) => {
     try {
         const books = all(`
@@ -572,16 +608,52 @@ app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
         return res.status(400).json({ error: '不能删除自己' });
     }
 
-    // 级联删除会处理相关数据，但为了保险可以手动清理，这里依赖外键级联
-    run('DELETE FROM users WHERE id = ?', [userId]);
-    res.json({ success: true });
+    try {
+        // 手动级联清理用户的所有关联数据
+        // 1. 清理该用户 owner 的词书及其关联
+        const ownedBooks = all('SELECT wordbook_id FROM user_wordbooks WHERE user_id = ? AND role = ?', [userId, 'owner']);
+        for (const book of ownedBooks) {
+            const wordIds = all('SELECT id FROM words WHERE wordbook_id = ?', [book.wordbook_id]).map(w => w.id);
+            if (wordIds.length > 0) {
+                const ph = wordIds.map(() => '?').join(',');
+                run(`DELETE FROM user_progress WHERE word_id IN (${ph})`, wordIds);
+                run(`DELETE FROM mistakes WHERE word_id IN (${ph})`, wordIds);
+            }
+            run('DELETE FROM words WHERE wordbook_id = ?', [book.wordbook_id]);
+            run('DELETE FROM user_wordbooks WHERE wordbook_id = ?', [book.wordbook_id]);
+            run('DELETE FROM wordbooks WHERE id = ?', [book.wordbook_id]);
+        }
+        // 2. 清理该用户的订阅、进度、错词
+        run('DELETE FROM user_wordbooks WHERE user_id = ?', [userId]);
+        run('DELETE FROM user_progress WHERE user_id = ?', [userId]);
+        run('DELETE FROM mistakes WHERE user_id = ?', [userId]);
+        // 3. 删除用户
+        run('DELETE FROM users WHERE id = ?', [userId]);
+        res.json({ success: true });
+    } catch (e) {
+        console.error('删除用户失败:', e);
+        res.status(500).json({ error: '删除失败' });
+    }
 });
 
-// 管理员：删除词书 (物理删除)
+// 管理员：删除词书 (物理删除 + 清理关联)
 app.delete('/api/admin/wordbooks/:id', requireAdmin, (req, res) => {
     const bookId = req.params.id;
-    run('DELETE FROM wordbooks WHERE id = ?', [bookId]);
-    res.json({ success: true });
+    try {
+        const wordIds = all('SELECT id FROM words WHERE wordbook_id = ?', [bookId]).map(w => w.id);
+        if (wordIds.length > 0) {
+            const ph = wordIds.map(() => '?').join(',');
+            run(`DELETE FROM user_progress WHERE word_id IN (${ph})`, wordIds);
+            run(`DELETE FROM mistakes WHERE word_id IN (${ph})`, wordIds);
+        }
+        run('DELETE FROM words WHERE wordbook_id = ?', [bookId]);
+        run('DELETE FROM user_wordbooks WHERE wordbook_id = ?', [bookId]);
+        run('DELETE FROM wordbooks WHERE id = ?', [bookId]);
+        res.json({ success: true });
+    } catch (e) {
+        console.error('管理员删除词书失败:', e);
+        res.status(500).json({ error: '删除失败' });
+    }
 });
 
 // 管理员：获取所有词书（排除克隆的）

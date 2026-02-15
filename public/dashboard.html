@@ -47,7 +47,6 @@
         <button onclick="logout()" class="p-2 -ml-2 text-slate-400 hover:text-white transition-colors">
             <span class="material-icons-round">logout</span>
         </button>
-        </div>
         <div class="flex items-center gap-4">
             <a href="/market.html" class="text-slate-400 hover:text-white transition-colors flex items-center gap-1"
                 title="词书市场">
@@ -212,7 +211,7 @@
 
     <script src="/js/settings.js"></script>
     <script>
-currentWordbook = null;
+        currentWordbook = null;
 
         // 检查登录状态
         async function checkAuth() {
@@ -304,8 +303,8 @@ currentWordbook = null;
         // 打开切换弹窗
         function openSwitchModal() {
             const list = document.getElementById('wordbookList');
-            const uploadedBooks = window.allWordbooks.filter(b => !b.is_cloned);
-            const marketBooks = window.allWordbooks.filter(b => b.is_cloned);
+            const uploadedBooks = window.allWordbooks.filter(b => b.role === 'owner');
+            const marketBooks = window.allWordbooks.filter(b => b.role !== 'owner');
 
             let html = '';
 

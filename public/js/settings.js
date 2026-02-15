@@ -141,30 +141,25 @@ const Settings = {
         let html = '<div class="space-y-3 max-h-[400px] overflow-y-auto pr-2">';
 
         books.forEach(book => {
-            const isOwner = !book.is_cloned; // 简单判断，或检查 role
-            // 这里用 is_cloned 区分 "上传的" 和 "市场的"
-            // 更严谨逻辑: role === 'owner'
-            // Dashboard API返回了 role
-            const role = book.role;
-            const isMyUpload = role === 'owner';
+            const isOwner = book.role === 'owner';
 
             html += `
                 <div class="bg-surface-dark p-4 rounded-xl border border-white/5 flex items-center justify-between">
                     <div class="flex-1 min-w-0 mr-4">
                         <div class="font-medium text-white truncate flex items-center gap-2">
                             ${book.name}
-                            ${!isMyUpload ? '<span class="text-[10px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded">订阅</span>' : ''}
+                            ${!isOwner ? '<span class="text-[10px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.5 rounded">订阅</span>' : ''}
                         </div>
                         <div class="text-xs text-slate-500 mt-0.5">${book.total_words} 词 • 可见性: ${book.is_public ? '公开' : '私有'}</div>
                     </div>
                     <div class="flex items-center gap-2">
-                        ${isMyUpload ? `
+                        ${isOwner ? `
                             <button onclick="Settings.renameBook(${book.id}, '${book.name}')" 
                                 class="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors" title="重命名">
                                 <span class="material-icons-round text-base">edit</span>
                             </button>
                         ` : ''}
-                        <button onclick="Settings.deleteBook(${book.id}, ${isMyUpload}, '${book.name}')" 
+                        <button onclick="Settings.deleteBook(${book.id}, ${isOwner}, '${book.name}')" 
                             class="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-400/10 rounded-lg transition-colors" title="删除">
                             <span class="material-icons-round text-base">delete</span>
                         </button>
@@ -242,11 +237,22 @@ const Settings = {
         }
     },
 
-    resetCurrent() {
+    async resetCurrent() {
         if (window.currentWordbook) {
-            if (confirm('确定要重置当前词书的所有进度吗？')) {
-                // 调用 Dashboard 里的逻辑或者直接fetch
-                // ... simplify
+            if (confirm('确定要重置当前词书的所有进度吗？此操作无法撤销。')) {
+                try {
+                    const res = await fetch(`/api/wordbooks/${window.currentWordbook.id}/reset`, { method: 'POST' });
+                    if (res.ok) {
+                        alert('进度已重置');
+                        window.allWordbooks = null;
+                        this.loadTab('wordbooks');
+                        if (typeof loadData === 'function') loadData();
+                    } else {
+                        alert('重置失败');
+                    }
+                } catch (e) {
+                    alert('系统错误');
+                }
             }
         }
     },
